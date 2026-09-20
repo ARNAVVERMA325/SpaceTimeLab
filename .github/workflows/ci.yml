@@ -1,0 +1,41 @@
+name: CI
+
+# The Milestone 1 Definition of Done is "unit test suite passes in CI". This workflow
+# is that gate. Every later milestone adds its validation tests to the same suite, so a
+# regression in a closed gate fails the build rather than being discovered by eye.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Typecheck, validation suite, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Physics validation suite
+        run: npm test
+
+      - name: Build
+        run: npm run build

@@ -12,7 +12,7 @@ every validation test listed under it is passing — not when the code merely ru
 render looks correct (`CLAUDE.md` §16: "A result is not considered validated merely
 because it 'looks right.'").
 
-**Last updated:** 2026-09-20 — repository bootstrap; governance documents added.
+**Last updated:** 2026-09-20 — Milestone 1 gate closed.
 
 ---
 
@@ -30,7 +30,7 @@ because it 'looks right.'").
 
 | Milestone / sub-gate | State |
 | --- | --- |
-| M1 — Minkowski baseline & engine plumbing | `not started` |
+| M1 — Minkowski baseline & engine plumbing | **`gate passed`** |
 | M2A — Exterior Schwarzschild, CPU reference | `not started` |
 | M2B — WebGPU/WGSL parallelization | `not started` |
 | M3 — Physical observer, tetrad frames & accretion disk | `not started` |
@@ -39,8 +39,9 @@ because it 'looks right.'").
 | M5A — 3+1 embedding & GWOSC strain (committed scope) | `not started` |
 | M5B — SXS / EHT (stretch, exploratory) | `not started` |
 
-Nothing below has been implemented or validated yet. Every validation row reads
-`not run` because no physics code exists in this repository.
+Milestone 1 is closed: all of its validation tests pass in CI. Everything below M1
+remains unimplemented, and those rows read `not run` because the corresponding physics
+code does not exist yet.
 
 ---
 
@@ -49,42 +50,99 @@ Nothing below has been implemented or validated yet. Every validation row reads
 These must be fixed **before** M1.1 lands, since `CLAUDE.md` §2 forbids silently mixing
 conventions and §19 warns that renaming later touches every downstream module.
 
+All conventions are declared in one place, `src/physics/conventions.ts`, and read from
+there by every module rather than assumed locally.
+
 | Convention | Value | Status |
 | --- | --- | --- |
-| Metric signature | `(-, +, +, +)` — implied by `CLAUDE.md` §3 (`g_mu_nu u^mu u^nu = -1`) | declared, not yet enforced in code |
-| Unit system | Geometric units, `G = c = 1`; horizon at `r = 2M` (`CLAUDE.md` §6.1) | declared, not yet enforced in code |
-| Coordinate ordering | `(t, r, theta, phi)` for spherical-type charts (`ROADMAP.md` 2A.1) | declared, not yet enforced in code |
-| Integration parameter | Affine parameter `lambda` for null geodesics; proper time `tau` for timelike | declared, not yet enforced in code |
-| Index / naming convention | `CLAUDE.md` §19 names (`g_mu_nu`, `g_inv_mu_nu`, `christoffel`, `four_velocity_u`, `null_wavevector_k`, ...) | declared, not yet enforced in code |
+| Metric signature | `(-, +, +, +)` — fixed by `CLAUDE.md` §3 (`g_mu_nu u^mu u^nu = -1`) | in code, asserted by tests |
+| Unit system | Geometric units, `G = c = 1`; horizon at `r = 2M` (`CLAUDE.md` §6.1) | in code |
+| Coordinate ordering | Carried per chart on the model (`CoordinateChart.coordinateNames`); `(t, x, y, z)` for Minkowski Cartesian, `(t, r, theta, phi)` for spherical-type charts from M2A | in code |
+| Integration parameter | Affine parameter `lambda` for null geodesics; proper time `tau` for timelike. Enforced by `parameterName(kind)` | in code, asserted by tests |
+| Index / naming convention | `CLAUDE.md` §19 names used verbatim (`g_mu_nu`, `g_inv_mu_nu`, `christoffel`, `four_velocity_u`, `null_wavevector_k`, `energy_E`, `angular_momentum_Lz`) | in code |
+| Index position (variance) | Tracked on `FourVector`; raising an already-raised index throws | in code, asserted by tests |
+| Floating point | IEEE-754 binary64 on the CPU reference path — higher precision than f32, still finite (`CLAUDE.md` §8) | in code |
 | Carter constant convention | Not yet chosen — required by `CLAUDE.md` §16 before M4A | **open** |
 
 ---
 
 ## M1 — Minkowski baseline & engine plumbing
 
-**State:** `not started`
+**State:** `gate passed` — 84 tests across 8 files, green in CI.
 
-| Validation test (`CLAUDE.md` §16) | Status |
-| --- | --- |
-| Null normalization `g_mu_nu k^mu k^nu = 0` | `not run` |
-| Timelike normalization `g_mu_nu u^mu u^nu = -1` | `not run` |
-| Straight-line propagation in flat space across 10^6 steps | `not run` |
-| Christoffel symbols identically zero in Minkowski (analytical check) | `not run` |
+| Validation test (`CLAUDE.md` §16) | Status | Measured |
+| --- | --- | --- |
+| Christoffel symbols identically zero in Minkowski (analytical check) | `pass` | exactly `0` |
+| Null normalization `g_mu_nu k^mu k^nu = 0` | `pass` | ≤ `4.7e-16` |
+| Timelike normalization `g_mu_nu u^mu u^nu = -1` | `pass` | within `1e-14` relative |
+| Straight-line propagation in flat space across 10^6 steps | `pass` | `1.1e-14` relative over coordinate distance `1.4e3` |
+| Flat-space limit: connection vanishes, curvature vanishes | `pass` | exactly `0` |
+| `energy_E` and `angular_momentum_Lz` conservation | `pass` | exactly `0` drift over 10^6 steps |
+| Convergence: RK4 global error under timestep halving | `pass` | ratio in `[14, 18]`, i.e. 4th order |
+| Tetrad orthonormality `g_mu_nu e^mu_(a) e^nu_(b) = eta_ab` | `pass` | exactly `0` |
+| Backward-traced image vs. direct analytic projection | `pass` | identical, pixel for pixel |
+| Wavevector preserved bit-for-bit along a flat-space ray | `pass` | exact equality |
 
 **Definition of Done:** unit test suite passes in CI; canvas renders an undistorted grid
-via backward ray tracing.
+via backward ray tracing. **Both met.**
 
-**Open decisions:**
+**What landed:**
 
-- Tolerance for the 10^6-step flat-space propagation test: not yet chosen. Per
-  `CLAUDE.md` §17, this must be justified per quantity — not a blanket `1e-5`.
+- `MetricTensor`, `ChristoffelSymbols`, `FourVector`, `PhaseSpaceState`, with `CLAUDE.md`
+  §19 naming from the first commit rather than renamed later.
+- Minkowski model with analytically zero Christoffel symbols, plus a general numerical
+  connection from central-differenced metric derivatives for models that will not have
+  closed-form symbols.
+- Fixed-step RK4 and adaptive RKF45 behind an integrator interface (`CLAUDE.md` §7.3),
+  so a symplectic method can be added for long-lived bound orbits without touching call
+  sites.
+- An integration driver owning termination policy, explicit NaN/infinity detection, and
+  `CLAUDE.md` §17 failure diagnostics (integrator, model, chart, parameter, step size,
+  failed quantity).
+- General 4x4 metric inversion with partial pivoting, exercised on off-diagonal metrics
+  now so that Kerr in M4A does not meet it for the first time inside a render.
+- Observer layer with a validated orthonormal tetrad and past-directed null ray
+  generation.
+- Backward null-geodesic ray tracer and Canvas2D output, with a provenance panel
+  covering every item `CLAUDE.md` §22 requires.
+
+**Decisions closed:**
+
+- Flat-space propagation tolerance: `1e-12` relative, set from a measured `1.1e-14` with
+  about two orders of magnitude of headroom. Justification is recorded alongside the
+  value in `src/physics/validation/tolerances.ts`.
+- RKF45 propagates the **fifth-order** solution (local extrapolation), so the embedded
+  difference estimates the error of the fourth-order solution that is *not* propagated
+  and acts as a conservative proxy. Stated explicitly because it changes what the
+  reported error norm means; Fehlberg's original formulation propagates the fourth-order
+  solution instead.
+- Backward-traced rays use a **past-directed** wavevector, `k^(a) = (-1, n)` in the
+  observer frame. Geometrically equivalent to the future-directed choice, since time
+  reversal maps null geodesics to null geodesics, but the sense matters for the
+  emitter-to-observer frequency shift in M3 and is fixed now to avoid a sign error there.
+
+**Known limitations, deliberately not papered over:**
+
+- The observer tetrad is the identity frame, which is correct and exactly orthonormal in
+  Cartesian Minkowski but is *not* the general static-observer construction. That is a
+  M3 deliverable (`ROADMAP.md` 3.1) and has not been faked.
+- No frequency shift, emission model or radiative transfer. M1 has no emitting matter and
+  no relative motion, so there is nothing to shift — steps 5 and 6 of `CLAUDE.md` §9 are
+  absent rather than approximated.
+- Render throughput is roughly 390k rays in about 7.5 s on the reference machine. That is
+  a CPU reference path, not an interactive target; 60 FPS is a M2B goal and `CLAUDE.md`
+  §21 is explicit that it is a rendering goal, not a scientific-validity requirement.
+- Curvature visible in the rendered grid lines is rectilinear projection of a sphere, not
+  light deflection. The UI says so, and the projection property it rests on — that a
+  pinhole camera maps great circles, and only great circles, to straight image lines — is
+  asserted by tests.
 
 ---
 
 ## M2A — Exterior Schwarzschild, CPU reference
 
-**State:** `not started`
-**Blocked on:** M1 gate.
+**State:** `not started` — unblocked; M1's gate is closed.
+**Depends on:** M1 (passed).
 
 | Validation test (`ROADMAP.md` 2A.4) | Status |
 | --- | --- |
@@ -227,7 +285,7 @@ Carried here so a session picking up mid-project can see them in one place.
 
 | # | Decision | Milestone | Status |
 | --- | --- | --- | --- |
-| 1 | Flat-space 10^6-step propagation tolerance | M1 | open |
+| 1 | Flat-space 10^6-step propagation tolerance | M1 | **closed** — `1e-12` relative, from a measured `1.1e-14` |
 | 2 | Conserved-quantity drift budget (roadmap states `< 1e-6` relative — confirm per quantity, `CLAUDE.md` §17) | M2A | open |
 | 3 | Weak-field deflection benchmark tolerance | M2A | open |
 | 4 | **GPU f32 vs. CPU f64 cross-validation tolerance** | M2B | open |
