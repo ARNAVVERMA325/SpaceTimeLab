@@ -4,10 +4,13 @@ import { MetricTensor } from '../core/metric-tensor.js';
 import type { Vec4 } from '../core/indices.js';
 import {
   IN_DOMAIN,
+  type CartesianVec3,
+  type ChartGeometry,
   type CoordinateChart,
   type DomainStatus,
   type KillingVector,
   type SpacetimeModel,
+  type Symmetries,
 } from './spacetime-model.js';
 
 /**
@@ -29,6 +32,7 @@ import {
 export const MINKOWSKI_CARTESIAN_CHART: CoordinateChart = Object.freeze<CoordinateChart>({
   id: 'minkowski-cartesian',
   displayName: 'Minkowski Cartesian (t, x, y, z)',
+  kind: 'cartesian',
   coordinateNames: ['t', 'x', 'y', 'z'],
   horizonPenetrating: false,
   notes:
@@ -91,6 +95,29 @@ const KILLING_VECTORS: readonly KillingVector[] = Object.freeze([
   },
 ]);
 
+/**
+ * In a Cartesian chart the auxiliary visualization axes are the coordinates themselves,
+ * and the metric is already orthonormal, so every conversion is the identity.
+ */
+const MINKOWSKI_GEOMETRY: ChartGeometry = {
+  spatialRadius: (x: Vec4): number => Math.hypot(x[1], x[2], x[3]),
+  toCartesianPosition: (x: Vec4): CartesianVec3 => [x[1], x[2], x[3]],
+  toCartesianDirection: (_x: Vec4, tangent: Vec4): CartesianVec3 => [
+    tangent[1],
+    tangent[2],
+    tangent[3],
+  ],
+};
+
+const MINKOWSKI_SYMMETRIES: Symmetries = Object.freeze({
+  stationary: true,
+  axisymmetric: true,
+  // Minkowski is spherically symmetric about any chosen origin. The flag is true, but
+  // the Cartesian chart has no polar-axis singularity for the orbital-plane reduction
+  // to avoid, so the raytracer has no reason to use it here.
+  sphericallySymmetric: true,
+});
+
 class MinkowskiSpacetime implements SpacetimeModel {
   readonly id = 'minkowski';
   readonly displayName = 'Minkowski spacetime';
@@ -99,6 +126,8 @@ class MinkowskiSpacetime implements SpacetimeModel {
   readonly conventions = CONVENTIONS;
   readonly parameters: Readonly<Record<string, number>> = Object.freeze({});
   readonly killingVectors = KILLING_VECTORS;
+  readonly symmetries = MINKOWSKI_SYMMETRIES;
+  readonly geometry = MINKOWSKI_GEOMETRY;
   readonly description =
     'Exact vacuum solution with zero curvature. Evaluating geodesics here is evaluating ' +
     'the consequences of a specified flat geometry, not solving the Einstein field ' +

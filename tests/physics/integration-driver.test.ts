@@ -32,6 +32,8 @@ function testModel(overrides: Partial<SpacetimeModel> & { id: string }): Spaceti
     conventions: CONVENTIONS,
     parameters: {},
     killingVectors: [],
+    symmetries: minkowski.symmetries,
+    geometry: minkowski.geometry,
     description: 'Test-only model. Not a physical spacetime.',
     metricAt: (x: Vec4) => minkowski.metricAt(x),
     christoffelAt: (x: Vec4) => minkowski.christoffelAt(x),

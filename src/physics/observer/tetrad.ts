@@ -50,6 +50,66 @@ export class Tetrad {
   }
 
   /**
+   * The orthonormal frame of a static observer in a diagonal metric.
+   *
+   * For g_mu_nu = diag(g_00, g_11, g_22, g_33) with g_00 < 0 and the spatial entries
+   * positive, the coordinate basis is already orthogonal, so orthonormalizing it is
+   * just a rescaling:
+   *
+   *   e^mu_(0) = (1 / sqrt(-g_00), 0, 0, 0)
+   *   e^mu_(i) = delta^mu_i / sqrt(g_ii)
+   *
+   * Leg (0) is the observer's four-velocity, which for Schwarzschild is the familiar
+   * u^mu = (1 / sqrt(-g_t_t), 0, 0, 0) = (1 / sqrt(f), 0, 0, 0) of a shell observer
+   * hovering at fixed r.
+   *
+   * This is ROADMAP.md 3.1's static-observer construction, landing early because
+   * Milestone 2A's camera has to be a physical observer rather than a labelled fake.
+   * The freely-falling observers, and everything that depends on relative motion
+   * between emitter and observer, remain Milestone 3 work.
+   *
+   * Throws for a metric with off-diagonal terms, rather than silently discarding them:
+   * Kerr in Boyer-Lindquist has a g_t_phi cross term and needs a genuine
+   * orthonormalization, not this shortcut.
+   */
+  static diagonalStatic(metric: MetricTensor): Tetrad {
+    for (let mu = 0; mu < 4; mu += 1) {
+      for (let nu = 0; nu < 4; nu += 1) {
+        if (mu !== nu && metric.g_mu_nu[mu * 4 + nu] !== 0) {
+          throw new RangeError(
+            `Tetrad.diagonalStatic: the metric has a non-zero off-diagonal component ` +
+              `g_${mu}_${nu} = ${metric.g_mu_nu[mu * 4 + nu]}. This construction assumes a ` +
+              'diagonal metric; a chart with cross terms needs a full orthonormalization.',
+          );
+        }
+      }
+    }
+
+    const g00 = metric.g_mu_nu[0];
+    if (!(g00 < 0)) {
+      throw new RangeError(
+        `Tetrad.diagonalStatic: g_00 = ${g00} is not negative, so no static observer ` +
+          'exists here. Inside a horizon the timelike Killing vector is spacelike and a ' +
+          'hovering observer is impossible.',
+      );
+    }
+
+    const components = new Float64Array(16);
+    components[0] = 1 / Math.sqrt(-g00);
+    for (let i = 1; i < 4; i += 1) {
+      const gii = metric.g_mu_nu[i * 4 + i];
+      if (!(gii > 0)) {
+        throw new RangeError(
+          `Tetrad.diagonalStatic: g_${i}_${i} = ${gii} is not positive; the spatial ` +
+            'metric has degenerated in this chart at this event.',
+        );
+      }
+      components[i * 4 + i] = 1 / Math.sqrt(gii);
+    }
+    return new Tetrad(components);
+  }
+
+  /**
    * The identity frame: e^mu_(a) = delta^mu_a.
    *
    * Orthonormal precisely when the metric components equal eta_ab at the event, which

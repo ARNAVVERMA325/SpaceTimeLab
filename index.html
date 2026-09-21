@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Spacetime Lab — Milestone 1</title>
+    <title>Spacetime Lab</title>
     <link
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='none' stroke='%237aa2f7' stroke-width='1.5'/><circle cx='8' cy='8' r='2' fill='%237aa2f7'/></svg>"
@@ -43,6 +43,31 @@
       }
       @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
       figure { margin: 0; }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .controls label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+      .controls select,
+      .controls button {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 10px;
+        font: inherit;
+        font-size: 13px;
+      }
+      .controls button { cursor: pointer; }
+      .controls button:disabled { opacity: 0.5; cursor: progress; }
       canvas {
         width: 100%;
         height: auto;
@@ -101,19 +126,30 @@
   </head>
   <body>
     <header>
-      <h1>Spacetime Lab — Milestone 1: Minkowski baseline</h1>
+      <h1>Spacetime Lab</h1>
       <p class="subtitle">
-        Backward null-geodesic ray tracing through flat spacetime. Deliberately
-        undramatic: a correct pipeline in Minkowski bends nothing, so the sky grid
-        arrives exactly as a pinhole camera would project it. Curved grid lines are
-        rectilinear projection of a sphere, not light deflection — see
-        <em>Image projection</em> below.
+        Backward null-geodesic ray tracing through a chosen spacetime. One pipeline,
+        two metrics: flat spacetime bends nothing, Schwarzschild bends light into a
+        shadow and an Einstein ring. Every number on the right comes from the render
+        you are looking at.
       </p>
     </header>
 
     <main>
       <figure>
-        <canvas id="view" width="640" height="480"></canvas>
+        <div class="controls">
+          <label for="scene">Spacetime</label>
+          <select id="scene"></select>
+          <label for="resolution">Width</label>
+          <select id="resolution">
+            <option value="120">120 px</option>
+            <option value="200" selected>200 px</option>
+            <option value="320">320 px</option>
+            <option value="480">480 px (slow)</option>
+          </select>
+          <button id="render" type="button">Re-render</button>
+        </div>
+        <canvas id="view" width="200" height="150"></canvas>
         <div id="status">Initializing…</div>
         <figcaption id="headline"></figcaption>
       </figure>
@@ -144,8 +180,10 @@
     <footer>
       The photon follows a null geodesic of the chosen spacetime. The grid is a
       visualization mapping on a sphere at fixed coordinate radius, not a physical
-      emitting surface. See <code>CLAUDE.md</code> for the project rules and
-      <code>STATUS.md</code> for validated milestone state.
+      emitting surface, and nothing here models emission, plasma or radiative transfer.
+      This is the CPU reference path: interactive frame rates are a separate milestone
+      with its own cross-validation gate. See <code>CLAUDE.md</code> for the project
+      rules and <code>STATUS.md</code> for validated milestone state.
     </footer>
 
     <script type="module" src="/src/main.ts"></script>

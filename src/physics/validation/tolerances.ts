@@ -169,6 +169,147 @@ export const TETRAD_ORTHONORMALITY = tolerance({
     'that M3 introduces.',
 });
 
+// ---------------------------------------------------------------------------
+// Milestone 2A — exterior Schwarzschild, CPU reference.
+//
+// Every bound below was set by measuring the implementation and leaving one to two
+// orders of magnitude of headroom, so a regression trips the gate while ordinary
+// variation does not.
+// ---------------------------------------------------------------------------
+
+/**
+ * Agreement between analytical Schwarzschild Christoffel symbols and centrally
+ * differenced ones, as a fraction of the largest symbol at that event.
+ */
+export const SCHWARZSCHILD_CHRISTOFFEL_NUMERIC = tolerance({
+  id: 'schwarzschild-christoffel-numeric',
+  quantity: 'max |Gamma_numeric - Gamma_analytic| / max |Gamma_analytic|',
+  kind: 'relative',
+  value: 1e-7,
+  justification:
+    'Measured agreement is 3e-10 or better between r = 3M and r = 100M, degrading to ' +
+    '1.6e-8 at r = 2.1M, where f = 1 - 2M/r is small and the connection varies sharply ' +
+    'over the differencing step, and to 6e-9 at r = 1000M, where the coordinate-scaled ' +
+    'step grows with r. The bound covers the worst of those with headroom. It applies to ' +
+    'the numerical path only: the analytical symbols are exact and are compared against ' +
+    'closed-form expressions directly.',
+});
+
+/**
+ * Relative drift of E and L_z along a traced Schwarzschild null geodesic.
+ *
+ * ROADMAP.md 2A.4 asks for drift under 1e-6. This bound is deliberately a hundred times
+ * tighter, and the roadmap figure is asserted separately so the stated gate is visibly
+ * met.
+ */
+export const CONSERVED_QUANTITY_DRIFT_SCHWARZSCHILD = tolerance({
+  id: 'conserved-quantity-drift-schwarzschild',
+  quantity: 'energy_E, angular_momentum_Lz along a traced null geodesic',
+  kind: 'relative',
+  value: 1e-7,
+  justification:
+    'Measured drift over a full deflection trace is at most 6e-12 for energy_E and ' +
+    '1.4e-9 for angular_momentum_Lz, across turning points from 3.2M to 10^4 M. L_z ' +
+    'drifts more because it is built from r^2 sin^2(theta) k^phi, so it carries the ' +
+    'coordinate magnitudes with it. Adopting the roadmap figure of 1e-6 as the gate ' +
+    'would leave three orders of magnitude of slack and let a real defect pass, which is ' +
+    'the failure mode CLAUDE.md §17 warns against.',
+});
+
+/**
+ * Departure of a circular null orbit from r = 3M over a bounded affine parameter.
+ *
+ * Bounded on purpose. The orbit is unstable, so this cannot be a statement about
+ * arbitrarily long integrations: any perturbation, including the rounding of the initial
+ * conditions themselves, grows exponentially.
+ */
+export const PHOTON_SPHERE_LOCK = tolerance({
+  id: 'photon-sphere-lock',
+  quantity: '|r - 3M| on a circular null orbit, over affine parameter <= 50M',
+  kind: 'absolute',
+  value: 1e-11,
+  justification:
+    'Absolute, since the target is the fixed radius 3M. Measured departure is 5.9e-13 at ' +
+    'lambda = 50M, about 4.6 complete orbits. Beyond that the orbit genuinely leaves: ' +
+    'the instability e-folds roughly every 1.8 in affine parameter, so machine-level ' +
+    'rounding in the initial data reaches order unity near lambda = 65M and the orbit ' +
+    'has visibly departed by lambda = 100M. That is physics, not a numerical defect, and ' +
+    'the suite asserts the departure as well as the lock.',
+});
+
+/** Traced deflection angle against the independently computed exact quadrature. */
+export const DEFLECTION_VS_EXACT = tolerance({
+  id: 'deflection-vs-exact',
+  quantity: 'traced deflection angle vs. the exact orbit-equation quadrature',
+  kind: 'relative',
+  value: 1e-7,
+  justification:
+    'Measured agreement is between 2e-13 and 6.4e-9 for turning points from 3.2M to ' +
+    '10^4 M, worst in the strong field where the deflection exceeds pi. The comparison ' +
+    'is between two genuinely different methods -- geodesic ODE integration against a ' +
+    'Gauss-Legendre quadrature of the orbit equation -- so agreement at this level is ' +
+    'evidence about the integrator rather than a restatement of it.',
+});
+
+/**
+ * The capture threshold in impact parameter, against b_c = 3 sqrt(3) M.
+ *
+ * Found by bisecting on whether a traced ray is captured, so it exercises the metric,
+ * the connection, the integrator and the capture condition together.
+ */
+export const CRITICAL_IMPACT_PARAMETER = tolerance({
+  id: 'critical-impact-parameter',
+  quantity: 'bisected capture threshold vs. b_c = 3 sqrt(3) M',
+  kind: 'relative',
+  value: 1e-8,
+  justification:
+    'Measured 1.8e-10 after 43 bisection steps. The threshold is a property of the whole ' +
+    'pipeline rather than of any one component, which makes it the strongest single ' +
+    'check in the Milestone 2A suite.',
+});
+
+/** |g_mu_nu k^mu k^nu| at the end of a traced Schwarzschild null geodesic. */
+export const NULL_NORMALIZATION_TRACED = tolerance({
+  id: 'null-normalization-traced',
+  quantity: 'g_mu_nu k^mu k^nu after a full curved-spacetime trace',
+  kind: 'absolute',
+  value: 1e-9,
+  justification:
+    'Absolute, since the target is exactly 0. Measured at most 1.8e-11 over deflection ' +
+    'traces reaching r = 3.2M. Looser than the pointwise flat-space bound of 1e-14 ' +
+    'because the invariant is not enforced by the integrator and genuinely accumulates ' +
+    'error here, where the connection is non-zero -- the two are different quantities ' +
+    'and CLAUDE.md §17 forbids giving them one shared threshold.',
+});
+
+/**
+ * |g_mu_nu k^mu k^nu| for the interactive CPU preview render.
+ *
+ * Deliberately looser than `NULL_NORMALIZATION_TRACED`, and a separate named tolerance
+ * rather than a relaxation of that one. CLAUDE.md §17 calls for benchmark-specific
+ * tolerances precisely so that a fast preview and a validated reference result are not
+ * judged by the same number — reporting a preview as "degraded" against the reference
+ * gate would be as misleading as reporting it as validated.
+ *
+ * CLAUDE.md §21 governs the trade: the preview lowers the *numerical tolerance* and the
+ * ray count, which are rendering budgets. It does not alter the metric, the connection
+ * or the geodesic equation, and the same code path produces both results.
+ */
+export const NULL_NORMALIZATION_PREVIEW = tolerance({
+  id: 'null-normalization-preview',
+  quantity: 'g_mu_nu k^mu k^nu in the interactive preview render',
+  kind: 'absolute',
+  value: 1e-7,
+  justification:
+    'Absolute, since the target is exactly 0. At the preview integration tolerance of ' +
+    '1e-10 the worst residual over a full Schwarzschild image is 1.7e-8, so this bound ' +
+    'leaves about six times headroom. Tightening the integrator to 1e-12, where the ' +
+    'residual meets the 1e-9 reference gate, costs roughly three times the work and ' +
+    'turns a slow render into an unusable one. The validated results in the test suite ' +
+    'all use the reference gate; this one is for the picture on screen, and the UI says ' +
+    'which it is showing.',
+});
+
 /** All declared tolerances, for the UI validation panel (CLAUDE.md §22). */
 export const ALL_TOLERANCES: readonly Tolerance[] = Object.freeze([
   NULL_NORMALIZATION_POINTWISE,
@@ -179,6 +320,13 @@ export const ALL_TOLERANCES: readonly Tolerance[] = Object.freeze([
   CHRISTOFFEL_NUMERIC_VS_ANALYTIC,
   METRIC_INVERSE_RESIDUAL,
   TETRAD_ORTHONORMALITY,
+  SCHWARZSCHILD_CHRISTOFFEL_NUMERIC,
+  CONSERVED_QUANTITY_DRIFT_SCHWARZSCHILD,
+  PHOTON_SPHERE_LOCK,
+  DEFLECTION_VS_EXACT,
+  CRITICAL_IMPACT_PARAMETER,
+  NULL_NORMALIZATION_TRACED,
+  NULL_NORMALIZATION_PREVIEW,
 ]);
 
 /**

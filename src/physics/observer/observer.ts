@@ -1,5 +1,6 @@
 import type { Vec4 } from '../core/indices.js';
 import { nullState, type PhaseSpaceState } from '../core/phase-space.js';
+import type { SpacetimeModel } from '../spacetimes/spacetime-model.js';
 import { frameToCoordinate, Tetrad } from './tetrad.js';
 
 /**
@@ -49,6 +50,44 @@ export function staticMinkowskiObserver(position_x: Vec4): Observer {
 }
 
 /**
+ * A static observer hovering at fixed spatial coordinates in a diagonal static metric.
+ *
+ * Its four-velocity is u^mu = (1 / sqrt(-g_00), 0, 0, 0), and its spatial frame is the
+ * orthonormalized coordinate basis. For Schwarzschild this is the shell observer: to
+ * stay at fixed r outside a black hole it must accelerate, which is why its frame is
+ * not the frame of a freely-falling observer and why Milestone 3 adds the latter rather
+ * than reusing this one.
+ *
+ * The frame's legs are ordered as the chart's coordinates: for Schwarzschild, leg (1)
+ * points along increasing r, leg (2) along increasing theta, leg (3) along increasing phi.
+ */
+export function staticObserver(model: SpacetimeModel, position_x: Vec4, id = 'static'): Observer {
+  const domain = model.domainCheck(position_x);
+  if (!domain.inDomain) {
+    throw new RangeError(
+      `staticObserver: the requested event is outside the chart domain. ${domain.reason}`,
+    );
+  }
+
+  const tetrad = Tetrad.diagonalStatic(model.metricAt(position_x));
+  const names = model.chart.coordinateNames;
+
+  return {
+    id,
+    displayName: `Static observer at fixed ${names[1]} = ${position_x[1]}`,
+    kind: 'physical-observer',
+    position_x,
+    tetrad,
+    description:
+      `At rest in the ${model.chart.displayName} chart, with four-velocity ` +
+      'u^mu = (1/sqrt(-g_00), 0, 0, 0). Its spatial frame is the orthonormalized ' +
+      `coordinate basis: leg (1) along ${names[1]}, leg (2) along ${names[2]}, leg (3) ` +
+      `along ${names[3]}. Holding this position requires proper acceleration; this is ` +
+      'not a freely-falling frame.',
+  };
+}
+
+/**
  * A pinhole screen in the observer's local rest frame (ROADMAP.md 3.2 groundwork).
  *
  * `forward`, `right` and `up` are unit 3-vectors in the observer's local orthonormal
@@ -72,6 +111,29 @@ export function defaultScreen(widthPx: number, heightPx: number, horizontalFovRa
     forward: [1, 0, 0],
     right: [0, 1, 0],
     up: [0, 0, 1],
+  };
+}
+
+/**
+ * A screen for an observer in a spherical chart, looking inward at the centre.
+ *
+ * Frame legs are (1) = radial, (2) = polar, (3) = azimuthal, so looking inward is
+ * forward = -leg(1). Up is taken as -leg(2), which points toward decreasing theta, i.e.
+ * north. Right is then -leg(3) so that right x up = forward, matching the handedness
+ * `defaultScreen` uses and keeping the rendered image unmirrored.
+ */
+export function inwardFacingScreen(
+  widthPx: number,
+  heightPx: number,
+  horizontalFovRad: number,
+): PinholeScreen {
+  return {
+    widthPx,
+    heightPx,
+    horizontalFovRad,
+    forward: [-1, 0, 0],
+    right: [0, 0, -1],
+    up: [0, -1, 0],
   };
 }
 

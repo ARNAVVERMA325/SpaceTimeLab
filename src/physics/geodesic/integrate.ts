@@ -5,7 +5,7 @@ import type { SpacetimeModel } from '../spacetimes/spacetime-model.js';
 import { firstNonFiniteIndex } from '../validation/numeric-health.js';
 import { geodesicDerivative, type DerivativeFn } from './geodesic-system.js';
 import type { Integrator } from './integrators/integrator.js';
-import { packState, positionOf, STATE_DIM, unpackState } from './state-vector.js';
+import { packState, STATE_DIM, unpackState } from './state-vector.js';
 
 /**
  * Geodesic / dynamical layer driver (CLAUDE.md §20).
@@ -67,10 +67,13 @@ export const DEFAULT_LIMITS: IntegrationLimits = Object.freeze({
 });
 
 /**
- * A caller-supplied stopping condition evaluated on the position after each accepted
- * step, e.g. "the ray has reached the background sphere".
+ * A caller-supplied stopping condition evaluated after each accepted step.
+ *
+ * Receives the tangent as well as the position, because a physically exact stopping
+ * condition often needs both: a photon inside the Schwarzschild photon sphere is
+ * captured if and only if it is moving inward, which no position alone can express.
  */
-export type Terminator = (position_x: Vec4, parameter: number) => boolean;
+export type Terminator = (position_x: Vec4, tangent: Vec4, parameter: number) => boolean;
 
 export interface IntegrateOptions {
   readonly model: SpacetimeModel;
@@ -117,6 +120,31 @@ export function integrateGeodesic(options: IntegrateOptions): IntegrationResult 
 
   const y = packState(initial);
   const previous = new Float64Array(STATE_DIM);
+
+  // Scratch tuples reused for every step's domain and terminator checks.
+  //
+  // A full image traces hundreds of thousands of rays of a few hundred steps each, and
+  // allocating a fresh position and tangent per step dominated the render time. Both
+  // callbacks receive readonly tuples and only read them, so one buffer each is enough.
+  // They are transient: a callback that stores one will see it change under it.
+  const positionScratch: [number, number, number, number] = [0, 0, 0, 0];
+  const tangentScratch: [number, number, number, number] = [0, 0, 0, 0];
+
+  const readPosition = (): Vec4 => {
+    positionScratch[0] = y[0];
+    positionScratch[1] = y[1];
+    positionScratch[2] = y[2];
+    positionScratch[3] = y[3];
+    return positionScratch;
+  };
+
+  const readTangent = (): Vec4 => {
+    tangentScratch[0] = y[4];
+    tangentScratch[1] = y[5];
+    tangentScratch[2] = y[6];
+    tangentScratch[3] = y[7];
+    return tangentScratch;
+  };
 
   let parameter = initial.parameter;
   const parameterStart = parameter;
@@ -212,16 +240,14 @@ export function integrateGeodesic(options: IntegrateOptions): IntegrationResult 
         : Math.max(maxErrorNorm, result.errorNorm);
     }
 
-    const position = positionOf(y);
-
     if (path) path.push(unpackState(y, initial.kind, parameter));
 
-    const domain = model.domainCheck(position);
+    const domain = model.domainCheck(readPosition());
     if (!domain.inDomain) {
       return finish('domain-exit', diagnose('position_x', domain.reason));
     }
 
-    if (terminator && terminator(position, parameter)) {
+    if (terminator && terminator(readPosition(), readTangent(), parameter)) {
       return finish('terminator');
     }
   }

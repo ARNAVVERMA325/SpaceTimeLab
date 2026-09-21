@@ -46,6 +46,8 @@ export function buildProvenanceReport(options: {
   readonly integrator: Integrator;
   readonly diagnostics: RenderDiagnostics;
   readonly backgroundRadius: number;
+  /** Scene-specific entries, appended after the shared ones. */
+  readonly sceneEntries?: readonly ProvenanceEntry[];
 }): ProvenanceReport {
   const { model, observer, integrator, diagnostics, backgroundRadius } = options;
   const coords = model.chart.coordinateNames.join(', ');
@@ -113,9 +115,10 @@ export function buildProvenanceReport(options: {
       label: 'Omitted physics',
       value: 'Emission, absorption, plasma, radiative transfer, frequency shift',
       note:
-        'Milestone 1 has no emitting matter and no relative motion between emitter and ' +
-        'observer, so there is nothing to shift. Redshift, Doppler boosting and beaming ' +
-        'arrive with the observer-tetrad milestone rather than being approximated now.',
+        'There is no emitting matter and no relative motion between emitter and observer ' +
+        'in this scene, so there is nothing to shift. Redshift, Doppler boosting, ' +
+        'relativistic beaming and an accretion disk arrive with Milestone 3 rather than ' +
+        'being approximated now. Nothing here is a prediction of an observed image.',
     },
     {
       label: 'Background',
@@ -154,11 +157,18 @@ export function buildProvenanceReport(options: {
     {
       label: 'Null normalization',
       value: `max |g_mu_nu k^mu k^nu| = ${nullResidualText}`,
-      note: 'Target is exactly 0 for a null geodesic.',
+      note:
+        'Target is exactly 0 for a null geodesic. Judged against the ' +
+        `"${diagnostics.residualTolerance.id}" tolerance of ` +
+        `${diagnostics.residualTolerance.value.toExponential(0)}. ` +
+        diagnostics.residualTolerance.justification,
     },
     {
       label: 'Rays traced',
-      value: `${diagnostics.raysTraced} (${diagnostics.raysReachingBackground} reached the background, ${diagnostics.raysFailed} failed numerically)`,
+      value:
+        `${diagnostics.raysTraced} total — ${diagnostics.raysReachingBackground} reached ` +
+        `the background, ${diagnostics.raysCaptured} were captured, ` +
+        `${diagnostics.raysFailed} failed numerically`,
     },
     {
       label: 'Integration steps',
@@ -170,6 +180,8 @@ export function buildProvenanceReport(options: {
       note: t.justification,
     })),
   ];
+
+  if (options.sceneEntries) entries.push(...options.sceneEntries);
 
   return {
     headline:

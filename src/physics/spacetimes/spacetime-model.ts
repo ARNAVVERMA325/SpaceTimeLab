@@ -25,9 +25,19 @@ export type ModelClassification =
  * Coordinates are representations, not physical objects, so the chart travels with
  * the model and is shown in the UI rather than being assumed by downstream code.
  */
+/**
+ * The shape of a chart's spatial coordinates.
+ *
+ * Recorded because some routines are only meaningful for one shape. The orbital-plane
+ * reduction, for instance, re-expresses a ray at (t, r, pi/2, 0), which is a statement
+ * about a spherical chart and nonsense in a Cartesian one.
+ */
+export type ChartKind = 'cartesian' | 'spherical';
+
 export interface CoordinateChart {
   readonly id: string;
   readonly displayName: string;
+  readonly kind: ChartKind;
   /** Coordinate names in index order 0..3, e.g. ['t','x','y','z'] or ['t','r','theta','phi']. */
   readonly coordinateNames: readonly [string, string, string, string];
   /** Whether integration can continue through an event horizon in this chart (CLAUDE.md §6.2). */
@@ -77,6 +87,63 @@ export interface KillingVector {
   at(x: Vec4): Vec4;
 }
 
+/** A vector in the auxiliary Cartesian axes used for plotting and background lookup. */
+export type CartesianVec3 = readonly [number, number, number];
+
+/**
+ * How a chart's coordinates relate to auxiliary Cartesian axes.
+ *
+ * The geodesic layer never needs this: it works in whatever chart the model declares.
+ * The visualization layer does, because a background direction and a screen are
+ * naturally Cartesian. Keeping the conversion on the model means the raytracer works
+ * for a spherical chart and a Cartesian one without knowing which it has.
+ *
+ * These Cartesian axes are a visualization convenience, not a physical structure.
+ * CLAUDE.md §1.3 applies: nothing here should be read as "where the event really is".
+ */
+export interface ChartGeometry {
+  /**
+   * The radial coordinate used for termination and background intersection.
+   *
+   * For a spherical chart this is the coordinate r itself; for a Cartesian one it is
+   * the Euclidean norm of the spatial coordinates.
+   */
+  spatialRadius(x: Vec4): number;
+
+  /** The event's spatial position on the auxiliary Cartesian axes. */
+  toCartesianPosition(x: Vec4): CartesianVec3;
+
+  /**
+   * The spatial propagation direction on the auxiliary Cartesian axes.
+   *
+   * Built from the tangent's orthonormal spatial components as measured in the static
+   * coordinate frame, so the result is a direction rather than a coordinate rate. At
+   * large radius that frame is asymptotically inertial and this is the direction the
+   * ray is actually travelling; close in it is the static frame's view and nothing
+   * more. The vector is not normalized.
+   */
+  toCartesianDirection(x: Vec4, tangent: Vec4): CartesianVec3;
+}
+
+/**
+ * Symmetries a model actually possesses.
+ *
+ * Declared rather than inferred, because CLAUDE.md §16 permits a conserved quantity
+ * only where the metric genuinely has the matching symmetry, and the raytracer's
+ * orbital-plane reduction is valid only under spherical symmetry.
+ */
+export interface Symmetries {
+  /** A timelike Killing vector exists: the metric is independent of the time coordinate. */
+  readonly stationary: boolean;
+  /** An axial Killing vector exists. */
+  readonly axisymmetric: boolean;
+  /**
+   * The full rotation group acts: every geodesic lies in a plane through the centre.
+   * Strictly stronger than axisymmetry, and what the orbital-plane reduction requires.
+   */
+  readonly sphericallySymmetric: boolean;
+}
+
 /**
  * A spacetime model: the geometry layer of CLAUDE.md §20.
  *
@@ -96,6 +163,10 @@ export interface SpacetimeModel {
   readonly killingVectors: readonly KillingVector[];
   /** Short statement of what this model is and is not, for the UI (CLAUDE.md §22). */
   readonly description: string;
+  /** Symmetries this metric genuinely has. */
+  readonly symmetries: Symmetries;
+  /** Relation between this chart and the auxiliary Cartesian visualization axes. */
+  readonly geometry: ChartGeometry;
 
   /** g_mu_nu and g_inv_mu_nu at an event. Allocates; not for the hot path. */
   metricAt(x: Vec4): MetricTensor;

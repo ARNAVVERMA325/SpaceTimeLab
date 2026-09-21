@@ -12,7 +12,7 @@ every validation test listed under it is passing — not when the code merely ru
 render looks correct (`CLAUDE.md` §16: "A result is not considered validated merely
 because it 'looks right.'").
 
-**Last updated:** 2026-09-20 — Milestone 1 gate closed.
+**Last updated:** 2026-09-21 — Milestone 2A gate closed.
 
 ---
 
@@ -31,7 +31,7 @@ because it 'looks right.'").
 | Milestone / sub-gate | State |
 | --- | --- |
 | M1 — Minkowski baseline & engine plumbing | **`gate passed`** |
-| M2A — Exterior Schwarzschild, CPU reference | `not started` |
+| M2A — Exterior Schwarzschild, CPU reference | **`gate passed`** |
 | M2B — WebGPU/WGSL parallelization | `not started` |
 | M3 — Physical observer, tetrad frames & accretion disk | `not started` |
 | M4A — Kerr, Boyer–Lindquist exterior | `not started` |
@@ -39,9 +39,13 @@ because it 'looks right.'").
 | M5A — 3+1 embedding & GWOSC strain (committed scope) | `not started` |
 | M5B — SXS / EHT (stretch, exploratory) | `not started` |
 
-Milestone 1 is closed: all of its validation tests pass in CI. Everything below M1
-remains unimplemented, and those rows read `not run` because the corresponding physics
-code does not exist yet.
+Milestones 1 and 2A are closed: all of their validation tests pass in CI, 145 tests
+across 13 files. Everything below M2A remains unimplemented, and those rows read
+`not run` because the corresponding physics code does not exist yet.
+
+**M2B is unblocked.** The roadmap is explicit that no shader work starts before the
+2A gate closes, and it has: the CPU reference is the ground truth every GPU result will
+be checked against.
 
 ---
 
@@ -63,6 +67,7 @@ there by every module rather than assumed locally.
 | Index position (variance) | Tracked on `FourVector`; raising an already-raised index throws | in code, asserted by tests |
 | Floating point | IEEE-754 binary64 on the CPU reference path — higher precision than f32, still finite (`CLAUDE.md` §8) | in code |
 | Carter constant convention | Not yet chosen — required by `CLAUDE.md` §16 before M4A | **open** |
+| Chart kind | Recorded per chart (`cartesian` / `spherical`), since some routines are valid for only one | in code, enforced |
 
 ---
 
@@ -141,34 +146,81 @@ via backward ray tracing. **Both met.**
 
 ## M2A — Exterior Schwarzschild, CPU reference
 
-**State:** `not started` — unblocked; M1's gate is closed.
+**State:** `gate passed`
 **Depends on:** M1 (passed).
 
-| Validation test (`ROADMAP.md` 2A.4) | Status |
-| --- | --- |
-| Photon sphere locks at `r = 3M` | `not run` |
-| `energy_E = -p_t` relative drift `< 1e-6` | `not run` |
-| `angular_momentum_Lz = p_phi` relative drift `< 1e-6` | `not run` |
-| Weak-field deflection vs. analytical `alpha ~ 4GM/(c^2 b)` | `not run` |
-| Flat-space limit recovered as `M -> 0` (`CLAUDE.md` §16) | `not run` |
+| Validation test (`ROADMAP.md` 2A.4) | Status | Measured |
+| --- | --- | --- |
+| Photon sphere locks at `r = 3M` | `pass` | `\|r - 3M\| = 5.9e-13` over 4.6 orbits |
+| Photon-sphere instability demonstrated | `pass` | departs by `lambda = 150M`, e-folds every ~1.8 |
+| Capture threshold vs. `b_c = 3 sqrt(3) M` | `pass` | `1.8e-10` relative, by bisection |
+| `energy_E = -p_t` relative drift `< 1e-6` | `pass` | `<= 6.3e-12` |
+| `angular_momentum_Lz = p_phi` relative drift `< 1e-6` | `pass` | `<= 1.4e-9` |
+| Weak-field deflection vs. analytical `alpha ~ 4GM/(c^2 b)` | `pass` | ratio → 1 as `1/b`: 1.0302, 1.0030, 1.00029, 1.000029 |
+| Traced deflection vs. exact orbit-equation quadrature | `pass` | `2e-13` to `6.4e-9` relative, `r_0` from 3.2M to 10^4 M |
+| Flat-space limit recovered as `M -> 0` (`CLAUDE.md` §16) | `pass` | mass-sourced symbols vanish linearly in M |
+| Analytic vs. numerically differenced Christoffels | `pass` | `<= 1.6e-8` relative |
+| Null normalization along traced rays | `pass` | `<= 1.8e-11` |
+| Shadow angular radius vs. `sin(psi) = b_c sqrt(f)/r` | `pass` | `< 1e-6` relative |
+| Orbital-plane reduction vs. full 3D integration | `pass` | exit directions agree to `< 1e-8`; ray stays in-plane to `< 1e-9` |
 
-**Definition of Done:** all of the above pass on the CPU reference. This is the ground
-truth every later GPU or Kerr result is checked against. **No shader work starts before
-this gate closes.**
+**Definition of Done:** all of 2A.4 passes on the CPU reference. **Met.** This is the
+ground truth every later GPU or Kerr result is checked against.
 
-**Open decisions:**
+**What landed:**
 
-- Horizon-detection predicate: must be derived from the metric / inverse-metric
-  components actually in use. `CLAUDE.md` §6.1 explicitly forbids detecting the horizon
-  via a vanishing metric determinant (the Schwarzschild determinant goes as
-  `-r^4 sin^2(theta)` and does not vanish at `r = 2M`).
+- Schwarzschild metric, inverse and analytical Christoffel symbols in `(t, r, theta, phi)`.
+  The symbols were derived symbolically from `CLAUDE.md` §2's definition and cross-checked
+  by confirming `R_mu_nu = 0` (vacuum) and `K = 48 M^2 / r^6`.
+- An independent analytic reference: the exact deflection quadrature, the finite-radius
+  tail integral, and the closed-form photon-sphere constants. Validated against values
+  computed separately before anything was checked against it.
+- Exterior domain checking, a static-observer tetrad, an inward-facing pinhole screen,
+  the orbital-plane reduction, and a chart-agnostic raytracer producing the shadow and
+  the lensed background.
+
+**Decisions closed:**
+
+- **Horizon detection** reads `f = 1 - 2M/r` from the metric components in use, never the
+  determinant. `CLAUDE.md` §6.1 forbids the determinant test, and the suite asserts why:
+  `det g = -r^4 sin^2(theta)` is about `-16 M^4` at `r = 2M`, nowhere near zero, while `f`
+  has vanished.
+- **Ray capture** uses the exact condition `r < 3M` with `k^r < 0`, not a tuned radius.
+  The null effective potential `f/r^2` increases inward of `3M`, so an inward-moving
+  photon there can never turn around. Rays stop while the chart is still well behaved
+  instead of being integrated toward `r = 2M`.
+- **Polar-axis handling.** Spherical charts degenerate on the axis. The renderer works
+  in each ray's own orbital plane — exact under spherical symmetry — so `sin(theta) = 1`
+  throughout and the axis is never approached. Cross-validated against full 3D
+  integration, and refused outright for a chart or a symmetry that does not support it.
+- **Preview vs. reference tolerance.** The interactive render integrates at `1e-10` and is
+  judged against `null-normalization-preview` (`1e-7`, measured `1.7e-8`); the validated
+  results use `null-normalization-traced` (`1e-9`, measured `1.8e-11`). Two named
+  tolerances rather than one relaxed gate, per `CLAUDE.md` §17. The UI states which it is
+  showing.
+
+**Known limitations, deliberately not papered over:**
+
+- Throughput is roughly 77k rays in 11.6 s for the black hole on the reference machine.
+  This is the CPU reference path; 60 FPS is M2B's goal and `CLAUDE.md` §21 is explicit it
+  is not a validity requirement.
+- The fine bands near the shadow edge alias into stippling. Approaching the capture
+  boundary the lensing map compresses an unbounded sequence of sky images into a
+  vanishing angular width, which no finite ray count resolves. No anti-aliasing is
+  applied, since smoothing must not stand in for resolving the structure (`CLAUDE.md` §9).
+- The exact-deflection quadrature is refused for `r_0 < 3.05M`, where the integrand
+  approaches a double root, rather than returning a quietly inaccurate value. It also
+  loses *relative* accuracy in the far weak field, where `alpha = 4*Integral - pi`
+  cancels almost completely; absolute accuracy stays near `1e-15`.
+- The static-observer tetrad is real but is only the shell observer. Freely-falling
+  observers, frequency shift, beaming and the accretion disk remain M3.
 
 ---
 
 ## M2B — WebGPU/WGSL parallelization
 
-**State:** `not started`
-**Blocked on:** M2A gate (hard gate — CPU reference must be green first).
+**State:** `not started` — unblocked; M2A's gate is closed.
+**Depends on:** M2A (passed). The CPU reference is now the cross-validation target.
 
 | Validation test (`ROADMAP.md` 2B.2) | Status |
 | --- | --- |
@@ -190,8 +242,11 @@ GPU results matching the CPU reference within a documented, justified tolerance.
 
 ## M3 — Physical observer, tetrad frames & accretion disk
 
-**State:** `not started`
-**Blocked on:** M2A gate.
+**State:** `not started` — unblocked; M2A's gate is closed.
+**Note:** 3.1's static-observer tetrad landed early with M2A, because 2A.3's camera had
+to be a physical observer rather than a labelled fake. It is validated against
+`g_mu_nu e^mu_(a) e^nu_(b) = eta_ab` in curved spacetime. Freely-falling observers,
+relativistic ray generation, frequency shift, beaming and the disk are all still open.
 
 | Validation test | Status |
 | --- | --- |
@@ -207,8 +262,12 @@ changes beaming/Doppler shift; disk shows the classical asymmetric intensity pat
 
 ## M4A — Kerr, Boyer–Lindquist exterior (`r > r_+`)
 
-**State:** `not started`
-**Blocked on:** M2A gate.
+**State:** `not started` — unblocked; M2A's gate is closed.
+**Note:** Kerr is axisymmetric but *not* spherically symmetric, so its geodesics do not
+lie in planes through the centre and the orbital-plane reduction does not apply. The
+reduction refuses a model that does not declare spherical symmetry, so this cannot be
+reached for by accident. Kerr in Boyer–Lindquist also has a `g_t_phi` cross term, which
+the diagonal static-tetrad construction refuses; M4A needs a genuine orthonormalization.
 
 | Validation test (`ROADMAP.md` 4A) | Status |
 | --- | --- |
@@ -286,11 +345,12 @@ Carried here so a session picking up mid-project can see them in one place.
 | # | Decision | Milestone | Status |
 | --- | --- | --- | --- |
 | 1 | Flat-space 10^6-step propagation tolerance | M1 | **closed** — `1e-12` relative, from a measured `1.1e-14` |
-| 2 | Conserved-quantity drift budget (roadmap states `< 1e-6` relative — confirm per quantity, `CLAUDE.md` §17) | M2A | open |
-| 3 | Weak-field deflection benchmark tolerance | M2A | open |
+| 2 | Conserved-quantity drift budget | M2A | **closed** — `1e-7` relative, 100x tighter than the roadmap's `1e-6`; measured `<= 1.4e-9` |
+| 3 | Weak-field deflection benchmark tolerance | M2A | **closed** — stated as convergence, not equality; traced vs. exact quadrature at `1e-7` relative |
 | 4 | **GPU f32 vs. CPU f64 cross-validation tolerance** | M2B | open |
 | 5 | Carter constant convention (not a tolerance, but must be fixed before M4A) | M4A | open |
 | 6 | Kerr–Schild vs. Boyer–Lindquist exterior agreement tolerance | M4B | open |
+| 7 | Preview vs. reference null-residual tolerance | M2A | **closed** — `1e-7` preview / `1e-9` reference, both measured |
 
 `CLAUDE.md` §17: there is no universal numerical-error threshold. Each entry above must
 be justified by the relevant numerical method and quantity when it is closed.
