@@ -1,7 +1,7 @@
 import type { Vec4 } from '../core/indices.js';
 import { nullState, type PhaseSpaceState } from '../core/phase-space.js';
 import type { SpacetimeModel } from '../spacetimes/spacetime-model.js';
-import { frameToCoordinate, Tetrad } from './tetrad.js';
+import { boostTetrad, frameToCoordinate, Tetrad } from './tetrad.js';
 
 /**
  * Observer layer (CLAUDE.md §4, §20).
@@ -84,6 +84,43 @@ export function staticObserver(model: SpacetimeModel, position_x: Vec4, id = 'st
       `coordinate basis: leg (1) along ${names[1]}, leg (2) along ${names[2]}, leg (3) ` +
       `along ${names[3]}. Holding this position requires proper acceleration; this is ` +
       'not a freely-falling frame.',
+  };
+}
+
+/**
+ * An observer falling radially from rest at infinity (ROADMAP.md 3.1).
+ *
+ * Its four-velocity in Schwarzschild coordinates is u^mu = (1/f, -sqrt(2M/r), 0, 0): energy
+ * E = 1, no angular momentum. Relative to the static observer at the same event it moves
+ * radially inward at v = sqrt(2M/r), so its frame is the static frame boosted by
+ * beta = -v along leg (1). At r = 20M that is 0.32c; it approaches c as r -> 2M, where
+ * the static frame itself ceases to exist.
+ *
+ * This is a geodesic observer — it feels no acceleration — in contrast to the static one,
+ * which must accelerate to hover. The two see different images from the same event:
+ * aberration concentrates the view ahead of the motion, so the infalling observer sees the
+ * shadow smaller, and the Doppler shift brightens and blueshifts what lies ahead.
+ */
+export function freeFallingObserver(
+  model: SpacetimeModel,
+  position_x: Vec4,
+  mass: number,
+  id = 'free-fall',
+): Observer {
+  const hover = staticObserver(model, position_x, id);
+  const v = Math.sqrt((2 * mass) / position_x[1]);
+  const tetrad = boostTetrad(hover.tetrad, [-v, 0, 0]);
+  return {
+    id,
+    displayName: `Observer falling radially from rest at infinity, now at r = ${position_x[1]}`,
+    kind: 'physical-observer',
+    position_x,
+    tetrad,
+    description:
+      'Freely falling, with energy E = 1 and no angular momentum: u^mu = (1/f, -sqrt(2M/r), 0, 0). ' +
+      `Moving inward at ${v.toFixed(4)}c relative to a static observer at the same event, so ` +
+      'its frame is the static frame Lorentz-boosted along the radial leg. A geodesic ' +
+      'observer: it feels no acceleration.',
   };
 }
 

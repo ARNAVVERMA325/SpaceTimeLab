@@ -7,6 +7,7 @@ import {
 } from '../physics/geodesic/formulation.js';
 import {
   integrateGeodesic,
+  type GeodesicEvent,
   type IntegrationLimits,
   type TerminationReason,
 } from '../physics/geodesic/integrate.js';
@@ -33,6 +34,14 @@ import {
   linearToSrgb8,
   type LinearRGB,
 } from './color.js';
+import {
+  diskSample,
+  displayGain,
+  toneMapReinhard,
+  type DiskSample,
+  type DisplayMapping,
+  type ThinDiskEmitter,
+} from './disk-emission.js';
 import {
   liftDirection,
   liftPosition,
@@ -61,6 +70,8 @@ import {
 export type RayOutcome =
   /** Reached the background sphere; the colour is a genuine sample of the grid. */
   | 'background'
+  /** Met an emitting accretion disk; the colour is its redshifted blackbody radiance. */
+  | 'disk'
   /** Fell into the black hole. No background light reaches the observer along this ray. */
   | 'captured'
   /** Ran out of parameter or steps before reaching the background. */
@@ -86,8 +97,13 @@ export interface RayResult {
   readonly exitDirection: CartesianVec3;
   /** Whether `exitDirection` was corrected to infinity. */
   readonly asymptoticallyCorrected: boolean;
-  /** This sample's contribution in linear light. */
+  /**
+   * This sample's contribution in display-linear light: before the tone curve, after
+   * exposure. Averaged across a pixel's samples as it stands.
+   */
   readonly radiance: LinearRGB;
+  /** The disk emission this ray carried, when it ended on the disk. */
+  readonly disk?: DiskSample;
   /** The orbital plane used, when the reduction was applied. */
   readonly frame?: OrbitalPlaneFrame;
 }
@@ -155,6 +171,15 @@ export interface TraceConfig {
   readonly asymptoticDirection?: (positionWorld: CartesianVec3, directionWorld: CartesianVec3) => CartesianVec3;
   /** Rays per pixel. Defaults to one ray through each pixel centre. */
   readonly sampling?: SamplingPlan;
+  /** An emitting thin accretion disk in the equatorial plane. */
+  readonly disk?: ThinDiskEmitter;
+  /** How radiance becomes a displayed colour. Required with a disk. */
+  readonly display?: DisplayMapping;
+  /**
+   * What escaping rays show. 'grid' is the coordinate grid on the celestial sphere — a
+   * visualization texture with no spectrum, drawn unshifted; 'black' is an empty sky.
+   */
+  readonly background?: 'grid' | 'black';
 }
 
 /**
@@ -197,6 +222,42 @@ export function traceRay(
     working = reduced.initial;
   }
 
+  const events: GeodesicEvent[] = [
+    {
+      // Arrival at the background sphere, located exactly rather than detected one step
+      // late: the ray is placed on r = R, so the direction read off it belongs to that
+      // radius and not to wherever the last step overshot to.
+      id: 'background',
+      value: (position_x) => model.geometry.spatialRadius(position_x) - grid.radius,
+      direction: 1,
+      terminal: true,
+    },
+  ];
+
+  const disk = config.disk;
+  if (disk) {
+    // Crossing the world equatorial plane, z = 0. Within the reduced orbital plane the
+    // world height is the lifted position's z component, so the event is written in
+    // those terms; it stops the ray only where the crossing lies on the annulus, and lets
+    // it pass straight through the plane elsewhere — which is how the far side of the
+    // disk, lensed over the top of the hole, comes to be seen at all.
+    const heightFraction = (position_x: Vec4): number => {
+      const p = model.geometry.toCartesianPosition(position_x);
+      const radius = Math.hypot(p[0], p[1], p[2]);
+      const z = frame ? p[0] * frame.e1[2] + p[1] * frame.e2[2] + p[2] * frame.normal[2] : p[2];
+      return z / radius;
+    };
+    events.push({
+      id: 'disk',
+      value: (position_x) => heightFraction(position_x),
+      direction: 0,
+      terminal: (state) => {
+        const r = model.geometry.spatialRadius(state.position_x);
+        return r >= disk.innerRadius && r <= disk.outerRadius;
+      },
+    });
+  }
+
   let captured = false;
   const result = integrateGeodesic({
     model,
@@ -204,17 +265,7 @@ export function traceRay(
     initial: working,
     session,
     limits: config.limits,
-    events: [
-      {
-        // Arrival at the background sphere, located exactly rather than detected one
-        // step late: the ray is placed on r = R, so the direction read off it belongs to
-        // that radius and not to wherever the last step overshot to.
-        id: 'background',
-        value: (position_x) => model.geometry.spatialRadius(position_x) - grid.radius,
-        direction: 1,
-        terminal: true,
-      },
-    ],
+    events,
     terminator: captureTest
       ? (position_x, tangent) => {
           if (captureTest(position_x, tangent)) {
@@ -231,7 +282,9 @@ export function traceRay(
     ? liftDirection(model, frame, result.final)
     : model.geometry.toCartesianDirection(result.final.position_x, result.final.tangent);
 
-  const reachedBackground = !captured && result.reason === 'event';
+  const lastEvent = result.events.at(-1);
+  const hitDisk = !captured && result.reason === 'event' && lastEvent?.id === 'disk';
+  const reachedBackground = !captured && result.reason === 'event' && lastEvent?.id === 'background';
   let exitDirection = localDirection;
   let asymptoticallyCorrected = false;
   if (reachedBackground && config.asymptoticDirection) {
@@ -254,6 +307,20 @@ export function traceRay(
 
   if (captured) {
     return { ...base, outcome: 'captured', color: SHADOW_COLOR, radiance: LINEAR_BLACK };
+  }
+
+  if (hitDisk && disk) {
+    if (!config.display) {
+      throw new Error('traceRay: a disk scene needs a display mapping to turn radiance into colour.');
+    }
+    const sample = diskSample(model, disk, result.final, frame);
+    const gain = displayGain(config.display);
+    const radiance: LinearRGB = {
+      r: sample.radiance.r * gain,
+      g: sample.radiance.g * gain,
+      b: sample.radiance.b * gain,
+    };
+    return { ...base, outcome: 'disk', color: SHADOW_COLOR, radiance, disk: sample };
   }
 
   let outcome: RayOutcome;
@@ -282,6 +349,9 @@ export function traceRay(
     return { ...base, outcome, color: FAILED_RAY_COLOR, radiance: decodeSrgb(FAILED_RAY_COLOR) };
   }
 
+  if ((config.background ?? 'grid') === 'black') {
+    return { ...base, outcome, color: SHADOW_COLOR, radiance: LINEAR_BLACK };
+  }
   const color = sampleCelestialGrid(grid, exitDirection[0], exitDirection[1], exitDirection[2]);
   return { ...base, outcome, color, radiance: decodeSrgb(color) };
 }
@@ -294,6 +364,12 @@ export interface RenderDiagnostics {
   readonly raysFailed: number;
   /** Rays that ended on the horizon: the black-hole shadow. */
   readonly raysCaptured: number;
+  /** Rays that ended on the accretion disk. */
+  readonly raysHittingDisk: number;
+  /** Range of the frequency ratio g = nu_obs / nu_emit over disk hits; NaN if none. */
+  readonly frequencyRatioRange: readonly [number, number];
+  /** Range of observed disk temperature g T(r), in kelvin; NaN if none. */
+  readonly observedTemperatureRange: readonly [number, number];
   /** Pixels containing at least one failed sample; drawn in the failure colour. */
   readonly pixelsWithFailures: number;
   readonly totalSteps: number;
@@ -340,9 +416,15 @@ export interface RenderAccumulator {
   raysReachingBackground: number;
   raysFailed: number;
   raysCaptured: number;
+  raysHittingDisk: number;
+  gMin: number;
+  gMax: number;
+  tMin: number;
+  tMax: number;
   pixelsWithFailures: number;
   totalSteps: number;
   maxNullResidual: number;
+  readonly toneMap: 'none' | 'reinhard';
 }
 
 export function createAccumulator(config: TraceConfig, screen: PinholeScreen): RenderAccumulator {
@@ -359,9 +441,15 @@ export function createAccumulator(config: TraceConfig, screen: PinholeScreen): R
     raysReachingBackground: 0,
     raysFailed: 0,
     raysCaptured: 0,
+    raysHittingDisk: 0,
+    gMin: Number.POSITIVE_INFINITY,
+    gMax: Number.NEGATIVE_INFINITY,
+    tMin: Number.POSITIVE_INFINITY,
+    tMax: Number.NEGATIVE_INFINITY,
     pixelsWithFailures: 0,
     totalSteps: 0,
     maxNullResidual: 0,
+    toneMap: config.display?.toneMap ?? 'none',
   };
 }
 
@@ -402,7 +490,14 @@ export function renderBand(
           accumulator.totalSteps += ray.steps;
           if (ray.outcome === 'background') accumulator.raysReachingBackground += 1;
           if (ray.outcome === 'captured') accumulator.raysCaptured += 1;
-          if (ray.outcome !== 'background' && ray.outcome !== 'captured') {
+          if (ray.outcome === 'disk' && ray.disk) {
+            accumulator.raysHittingDisk += 1;
+            accumulator.gMin = Math.min(accumulator.gMin, ray.disk.frequencyRatio);
+            accumulator.gMax = Math.max(accumulator.gMax, ray.disk.frequencyRatio);
+            accumulator.tMin = Math.min(accumulator.tMin, ray.disk.observedTemperatureK);
+            accumulator.tMax = Math.max(accumulator.tMax, ray.disk.observedTemperatureK);
+          }
+          if (ray.outcome !== 'background' && ray.outcome !== 'captured' && ray.outcome !== 'disk') {
             accumulator.raysFailed += 1;
             failed = true;
           }
@@ -433,9 +528,11 @@ export function renderBand(
         accumulator.pixels[offset + 1] = FAILED_RAY_COLOR.g;
         accumulator.pixels[offset + 2] = FAILED_RAY_COLOR.b;
       } else {
-        accumulator.pixels[offset] = linearToSrgb8(r / samples);
-        accumulator.pixels[offset + 1] = linearToSrgb8(g / samples);
-        accumulator.pixels[offset + 2] = linearToSrgb8(b / samples);
+        const mean = { r: r / samples, g: g / samples, b: b / samples };
+        const shown = accumulator.toneMap === 'reinhard' ? toneMapReinhard(mean) : mean;
+        accumulator.pixels[offset] = linearToSrgb8(shown.r);
+        accumulator.pixels[offset + 1] = linearToSrgb8(shown.g);
+        accumulator.pixels[offset + 2] = linearToSrgb8(shown.b);
       }
       accumulator.pixels[offset + 3] = 255;
     }
@@ -450,26 +547,93 @@ export function renderBand(
  * the picture to speak for itself.
  */
 export function finalizeRender(accumulator: RenderAccumulator, config?: TraceConfig): RenderResult {
-  const nullCheck = checkTolerance(accumulator.residualTolerance, accumulator.maxNullResidual);
-  const samplesPerPixel = accumulator.samplesPerAxis * accumulator.samplesPerAxis;
   return {
     widthPx: accumulator.widthPx,
     heightPx: accumulator.heightPx,
     pixels: accumulator.pixels,
     linear: accumulator.linear,
-    diagnostics: {
-      raysTraced: accumulator.widthPx * accumulator.heightPx * samplesPerPixel,
-      samplesPerPixel,
-      raysReachingBackground: accumulator.raysReachingBackground,
-      raysFailed: accumulator.raysFailed,
-      raysCaptured: accumulator.raysCaptured,
-      pixelsWithFailures: accumulator.pixelsWithFailures,
-      totalSteps: accumulator.totalSteps,
-      maxNullResidual: accumulator.maxNullResidual,
-      health: summarizeHealth([nullCheck], accumulator.raysFailed > 0),
-      residualTolerance: accumulator.residualTolerance,
-      asymptoticallyCorrected: config?.asymptoticDirection !== undefined,
-    },
+    diagnostics: diagnosticsFromStats(
+      accumulator,
+      accumulator.widthPx * accumulator.heightPx,
+      accumulator.samplesPerAxis,
+      accumulator.residualTolerance,
+      config?.asymptoticDirection !== undefined,
+    ),
+  };
+}
+
+/** The per-image counters, separable so that partial renders can be merged. */
+export interface RenderStats {
+  raysReachingBackground: number;
+  raysFailed: number;
+  raysCaptured: number;
+  raysHittingDisk: number;
+  gMin: number;
+  gMax: number;
+  tMin: number;
+  tMax: number;
+  pixelsWithFailures: number;
+  totalSteps: number;
+  maxNullResidual: number;
+}
+
+export function emptyStats(): RenderStats {
+  return {
+    raysReachingBackground: 0,
+    raysFailed: 0,
+    raysCaptured: 0,
+    raysHittingDisk: 0,
+    gMin: Number.POSITIVE_INFINITY,
+    gMax: Number.NEGATIVE_INFINITY,
+    tMin: Number.POSITIVE_INFINITY,
+    tMax: Number.NEGATIVE_INFINITY,
+    pixelsWithFailures: 0,
+    totalSteps: 0,
+    maxNullResidual: 0,
+  };
+}
+
+/** Combine the counters of two disjoint partial renders. */
+export function mergeStats(into: RenderStats, from: RenderStats): RenderStats {
+  into.raysReachingBackground += from.raysReachingBackground;
+  into.raysFailed += from.raysFailed;
+  into.raysCaptured += from.raysCaptured;
+  into.raysHittingDisk += from.raysHittingDisk;
+  into.gMin = Math.min(into.gMin, from.gMin);
+  into.gMax = Math.max(into.gMax, from.gMax);
+  into.tMin = Math.min(into.tMin, from.tMin);
+  into.tMax = Math.max(into.tMax, from.tMax);
+  into.pixelsWithFailures += from.pixelsWithFailures;
+  into.totalSteps += from.totalSteps;
+  into.maxNullResidual = Math.max(into.maxNullResidual, from.maxNullResidual);
+  return into;
+}
+
+export function diagnosticsFromStats(
+  stats: RenderStats,
+  pixelCount: number,
+  samplesPerAxis: number,
+  residualTolerance: Tolerance,
+  asymptoticallyCorrected: boolean,
+): RenderDiagnostics {
+  const nullCheck = checkTolerance(residualTolerance, stats.maxNullResidual);
+  const samplesPerPixel = samplesPerAxis * samplesPerAxis;
+  return {
+    raysTraced: pixelCount * samplesPerPixel,
+    samplesPerPixel,
+    raysReachingBackground: stats.raysReachingBackground,
+    raysFailed: stats.raysFailed,
+    raysCaptured: stats.raysCaptured,
+    raysHittingDisk: stats.raysHittingDisk,
+    frequencyRatioRange: stats.raysHittingDisk > 0 ? [stats.gMin, stats.gMax] : [Number.NaN, Number.NaN],
+    observedTemperatureRange:
+      stats.raysHittingDisk > 0 ? [stats.tMin, stats.tMax] : [Number.NaN, Number.NaN],
+    pixelsWithFailures: stats.pixelsWithFailures,
+    totalSteps: stats.totalSteps,
+    maxNullResidual: stats.maxNullResidual,
+    health: summarizeHealth([nullCheck], stats.raysFailed > 0),
+    residualTolerance,
+    asymptoticallyCorrected,
   };
 }
 

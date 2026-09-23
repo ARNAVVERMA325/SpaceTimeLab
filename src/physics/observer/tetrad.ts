@@ -124,6 +124,53 @@ export class Tetrad {
 }
 
 /**
+ * The frame of an observer moving with velocity `beta` relative to `tetrad`'s observer.
+ *
+ * `beta` is given in the original frame's spatial components (legs 1..3), |beta| < 1. The
+ * boosted legs are e'_(b) = Lambda^a_b e_(a) with the standard pure boost
+ *
+ *   Lambda^0_0 = gamma,          Lambda^0_j = gamma beta_j,
+ *   Lambda^i_0 = gamma beta_i,   Lambda^i_j = delta_ij + (gamma - 1) n_i n_j,
+ *
+ * n = beta / |beta|. Leg (0) of the result is the moving observer's four-velocity. Two
+ * observers at the same event differ only by such a boost, which is how aberration and
+ * the Doppler shift enter a render: through the frame, not through any change to the
+ * geodesics.
+ */
+export function boostTetrad(tetrad: Tetrad, beta: readonly [number, number, number]): Tetrad {
+  const speed = Math.hypot(beta[0], beta[1], beta[2]);
+  if (!(speed < 1)) {
+    throw new RangeError(`boostTetrad: |beta| = ${speed} is not below 1.`);
+  }
+  if (speed === 0) return new Tetrad(Float64Array.from(tetrad.components));
+  const gamma = 1 / Math.sqrt(1 - speed * speed);
+  const n = [beta[0] / speed, beta[1] / speed, beta[2] / speed];
+
+  // Lambda[a][b], a = original leg, b = boosted leg.
+  const lambda = [
+    [gamma, gamma * beta[0], gamma * beta[1], gamma * beta[2]],
+    [gamma * beta[0], 0, 0, 0],
+    [gamma * beta[1], 0, 0, 0],
+    [gamma * beta[2], 0, 0, 0],
+  ];
+  for (let i = 0; i < 3; i += 1) {
+    for (let j = 0; j < 3; j += 1) {
+      lambda[i + 1][j + 1] = (i === j ? 1 : 0) + (gamma - 1) * n[i] * n[j];
+    }
+  }
+
+  const out = new Float64Array(16);
+  for (let b = 0; b < 4; b += 1) {
+    for (let mu = 0; mu < 4; mu += 1) {
+      let sum = 0;
+      for (let a = 0; a < 4; a += 1) sum += lambda[a][b] * tetrad.components[a * 4 + mu];
+      out[b * 4 + mu] = sum;
+    }
+  }
+  return new Tetrad(out);
+}
+
+/**
  * Largest |g_mu_nu e^mu_(a) e^nu_(b) - eta_ab| over all leg pairs.
  *
  * The direct test that a frame really is orthonormal, and the reason the M1 observer
