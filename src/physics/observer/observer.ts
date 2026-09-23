@@ -148,12 +148,28 @@ export function localRayDirection(
   i: number,
   j: number,
 ): [number, number, number] {
+  return localRayDirectionAt(screen, i + 0.5, j + 0.5);
+}
+
+/**
+ * The unit viewing direction through a continuous screen position (u, v).
+ *
+ * u runs over [0, widthPx) left to right and v over [0, heightPx) top to bottom, so the
+ * centre of pixel (i, j) is (i + 0.5, j + 0.5). Subpixel sampling uses this directly.
+ */
+export function localRayDirectionAt(
+  screen: PinholeScreen,
+  u: number,
+  v: number,
+): [number, number, number] {
   const { widthPx, heightPx } = screen;
+  const i = u - 0.5;
+  const j = v - 0.5;
   const tanHalfFov = Math.tan(screen.horizontalFovRad / 2);
   const aspect = widthPx / heightPx;
 
-  const xNdc = ((i + 0.5) / widthPx) * 2 - 1;
-  const yNdc = 1 - ((j + 0.5) / heightPx) * 2;
+  const xNdc = (u / widthPx) * 2 - 1;
+  const yNdc = 1 - (v / heightPx) * 2;
 
   const sx = xNdc * tanHalfFov;
   const sy = (yNdc * tanHalfFov) / aspect;

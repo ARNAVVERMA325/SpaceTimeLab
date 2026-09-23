@@ -258,6 +258,65 @@ class SchwarzschildSpacetime implements SpacetimeModel {
     return new MetricTensor(g, gInv);
   }
 
+  metricInto(x: Vec4, out: Float64Array): void {
+    const r = x[1];
+    const sinTheta = Math.sin(x[2]);
+    const f = 1 - (2 * this.M) / r;
+    out.fill(0);
+    out[0] = -f;
+    out[5] = 1 / f;
+    out[10] = r * r;
+    out[15] = r * r * sinTheta * sinTheta;
+  }
+
+  inverseMetricInto(x: Vec4, out: Float64Array): void {
+    const r = x[1];
+    const sinTheta = Math.sin(x[2]);
+    const f = 1 - (2 * this.M) / r;
+    out.fill(0);
+    out[0] = -1 / f;
+    out[5] = f;
+    out[10] = 1 / (r * r);
+    out[15] = 1 / (r * r * sinTheta * sinTheta);
+  }
+
+  /**
+   * d_alpha g^{mu nu}, derived symbolically and confirmed to reproduce the geodesic
+   * equation identically when fed through Hamilton's equations. The non-zero entries:
+   *
+   *   d_r g^{tt}         =  2M / (r - 2M)^2  =  2M / (r^2 f^2)
+   *   d_r g^{rr}         =  2M / r^2
+   *   d_r g^{theta theta} = -2 / r^3
+   *   d_r g^{phi phi}     = -2 / (r^3 sin^2(theta))
+   *   d_theta g^{phi phi} = -2 cos(theta) / (r^2 sin^3(theta))
+   *
+   * Nothing depends on t or phi, so d_t and d_phi vanish — which is exactly why p_t and
+   * p_phi are conserved by construction in the Hamiltonian formulation.
+   */
+  inverseMetricDerivativesInto(x: Vec4, out: Float64Array): void {
+    if (out.length !== 64) {
+      throw new RangeError('inverseMetricDerivativesInto expects a 64-entry buffer.');
+    }
+    out.fill(0);
+    const r = x[1];
+    const theta = x[2];
+    const M = this.M;
+    const sinTheta = Math.sin(theta);
+    const cosTheta = Math.cos(theta);
+    const r2 = r * r;
+    const r3 = r2 * r;
+    const sin2 = sinTheta * sinTheta;
+    const rMinus2M = r - 2 * M;
+
+    // alpha = r (index 1): offset 16.
+    out[16 + 0] = (2 * M) / (rMinus2M * rMinus2M);
+    out[16 + 5] = (2 * M) / r2;
+    out[16 + 10] = -2 / r3;
+    out[16 + 15] = -2 / (r3 * sin2);
+    // alpha = theta (index 2): offset 32.
+    out[32 + 15] = (-2 * cosTheta) / (r2 * sin2 * sinTheta);
+  }
+
   christoffelAt(x: Vec4): ChristoffelSymbols {
     const out = new Float64Array(64);
     this.christoffelInto(x, out);

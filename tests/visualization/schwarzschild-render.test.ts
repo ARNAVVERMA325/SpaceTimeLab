@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Vec4 } from '../../src/physics/core/indices.js';
-import { RKF45Integrator } from '../../src/physics/geodesic/integrators/rkf45.js';
+import { Dopri5Integrator } from '../../src/physics/geodesic/integrators/dopri5.js';
 import { STATE_DIM } from '../../src/physics/geodesic/state-vector.js';
 import {
   generateNullRay,
@@ -50,14 +50,11 @@ function shadowAngularRadius(r: number): number {
 
 const config: TraceConfig = {
   model,
-  // 1e-12 rather than something looser, for a measured reason. At 1e-11 the worst ray
-  // in a full render — one passing just outside the capture boundary, which spirals
-  // several times near the photon sphere before escaping — accumulates a null residual
-  // of 1.5e-9, above the declared NULL_NORMALIZATION_TRACED gate of 1e-9. The honest
-  // response is to integrate more tightly, not to widen the gate to fit the result
-  // (CLAUDE.md §17). At 1e-12 the worst residual over the same image is 1.4e-10.
-  integrator: new RKF45Integrator(STATE_DIM, {
-    tolerance: { absolute: 1e-12, relative: 1e-12 },
+  // The same engine as the application: Hamiltonian formulation (the renderer default)
+  // with Dormand-Prince. At 1e-11 the worst null residual over a full image is well
+  // inside the 1e-9 reference gate.
+  integrator: new Dopri5Integrator(STATE_DIM, {
+    tolerance: { absolute: 1e-11, relative: 1e-11 },
   }),
   observer,
   grid: { ...DEFAULT_CELESTIAL_GRID, radius: 400 },

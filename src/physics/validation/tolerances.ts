@@ -275,39 +275,14 @@ export const NULL_NORMALIZATION_TRACED = tolerance({
   kind: 'absolute',
   value: 1e-9,
   justification:
-    'Absolute, since the target is exactly 0. Measured at most 1.8e-11 over deflection ' +
-    'traces reaching r = 3.2M. Looser than the pointwise flat-space bound of 1e-14 ' +
-    'because the invariant is not enforced by the integrator and genuinely accumulates ' +
-    'error here, where the connection is non-zero -- the two are different quantities ' +
-    'and CLAUDE.md §17 forbids giving them one shared threshold.',
-});
-
-/**
- * |g_mu_nu k^mu k^nu| for the interactive CPU preview render.
- *
- * Deliberately looser than `NULL_NORMALIZATION_TRACED`, and a separate named tolerance
- * rather than a relaxation of that one. CLAUDE.md §17 calls for benchmark-specific
- * tolerances precisely so that a fast preview and a validated reference result are not
- * judged by the same number — reporting a preview as "degraded" against the reference
- * gate would be as misleading as reporting it as validated.
- *
- * CLAUDE.md §21 governs the trade: the preview lowers the *numerical tolerance* and the
- * ray count, which are rendering budgets. It does not alter the metric, the connection
- * or the geodesic equation, and the same code path produces both results.
- */
-export const NULL_NORMALIZATION_PREVIEW = tolerance({
-  id: 'null-normalization-preview',
-  quantity: 'g_mu_nu k^mu k^nu in the interactive preview render',
-  kind: 'absolute',
-  value: 1e-7,
-  justification:
-    'Absolute, since the target is exactly 0. At the preview integration tolerance of ' +
-    '1e-10 the worst residual over a full Schwarzschild image is 1.7e-8, so this bound ' +
-    'leaves about six times headroom. Tightening the integrator to 1e-12, where the ' +
-    'residual meets the 1e-9 reference gate, costs roughly three times the work and ' +
-    'turns a slow render into an unusable one. The validated results in the test suite ' +
-    'all use the reference gate; this one is for the picture on screen, and the UI says ' +
-    'which it is showing.',
+    'Absolute, since the target is exactly 0. With the Hamiltonian formulation and ' +
+    'Dormand-Prince at tolerance 1e-10 the worst residual over a full Schwarzschild image ' +
+    'is 5.1e-10, set by the most nearly critical ray and unchanged from 30k to 120k rays ' +
+    'per image. That is what lets the interactive render be judged against this gate ' +
+    'rather than a looser preview one, which the previous engine needed. Looser than the ' +
+    'pointwise flat-space bound of 1e-14 because the invariant is not enforced by the ' +
+    'integrator and genuinely accumulates error where the connection is non-zero; in the ' +
+    'Hamiltonian form it is the only invariant left to drift, p_t and p_phi being exact.',
 });
 
 /** All declared tolerances, for the UI validation panel (CLAUDE.md §22). */
@@ -326,7 +301,6 @@ export const ALL_TOLERANCES: readonly Tolerance[] = Object.freeze([
   DEFLECTION_VS_EXACT,
   CRITICAL_IMPACT_PARAMETER,
   NULL_NORMALIZATION_TRACED,
-  NULL_NORMALIZATION_PREVIEW,
 ]);
 
 /**

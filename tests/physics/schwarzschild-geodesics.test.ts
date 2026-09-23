@@ -3,6 +3,7 @@ import type { Vec4 } from '../../src/physics/core/indices.js';
 import { nullState } from '../../src/physics/core/phase-space.js';
 import { integrateGeodesic } from '../../src/physics/geodesic/integrate.js';
 import type { ErrorTolerance } from '../../src/physics/geodesic/integrators/integrator.js';
+import { Dopri5Integrator } from '../../src/physics/geodesic/integrators/dopri5.js';
 import { RKF45Integrator } from '../../src/physics/geodesic/integrators/rkf45.js';
 import { STATE_DIM } from '../../src/physics/geodesic/state-vector.js';
 import {
@@ -90,25 +91,87 @@ describe('photon sphere (ROADMAP.md 2A.4)', () => {
     expect(turns).toBeGreaterThan(4);
   });
 
-  it('shows the orbit is unstable, as the potential maximum requires', () => {
-    // Guards the lock test above: an orbit that stayed at 3M forever would mean the
-    // integrator was not following the physics, since this equilibrium is a maximum.
+  it('grows perturbations at the analytic Lyapunov exponent 1/(3 sqrt(3) M)', () => {
+    // The instability, measured rather than merely observed. Linearizing
+    // d^2r/dlambda^2 = -1/2 L^2 V'(r) about r = 3M gives d^2 delta/dlambda^2 = kappa^2 delta
+    // with kappa = E / (sqrt(3) M) per unit affine parameter; with dt/dlambda = 3E at the
+    // photon sphere that is lambda_t = 1/(3 sqrt(3) M) in coordinate time — the result of
+    // Cardoso et al., Phys. Rev. D 79, 064016 (2009), and equal to the orbital frequency,
+    // so a perturbation grows by exactly e^pi per half orbit.
+    //
+    // An earlier version of this test only asserted that an *unperturbed* orbit had
+    // wandered off by lambda = 150M. That was testing an artifact: in the Christoffel form,
+    // rounding seeded the instability, while in the Hamiltonian form dp_r/dlambda at r = 3M
+    // evaluates to exactly zero and the circular orbit is a bit-exact fixed point — which
+    // is the correct solution. The physics is in the growth rate, so that is what is
+    // measured.
+    const b = criticalImpactParameter(M);
+    const epsilon = 3e-9;
+    const r = rPhoton + epsilon;
+    const f = model.lapseFunction(r);
+    // The pure growing mode. With E = 1 and b = b_c the radial null condition factors as
+    // (k^r)^2 = (9 eps^2 + eps^3) / r^3, which avoids the catastrophic cancellation in
+    // E^2 - f L^2 / r^2: that difference of two O(1) numbers is about 3e-18 here, far
+    // below the rounding of either term.
+    const kr = Math.sqrt((9 * epsilon * epsilon + epsilon ** 3) / r ** 3);
+    const initial = nullState([0, r, Math.PI / 2, 0], [1 / f, kr, 0, b / (r * r)]);
+    expect(Math.abs(normalizationResidual(model, initial))).toBeLessThan(1e-15);
+
+    const result = integrateGeodesic({
+      model,
+      integrator: new Dopri5Integrator(STATE_DIM, { tolerance: { absolute: 1e-13, relative: 1e-13 } }),
+      initial,
+      recordPath: true,
+      limits: { initialStep: 1e-3, parameterMax: 40, maxSteps: 1_000_000, maxStep: 0.05 },
+    });
+
+    // Least-squares slope of ln(r - 3M) against lambda, in the linear regime.
+    const points = result.path!
+      .map((state) => [state.parameter, Math.log(state.position_x[1] - rPhoton)] as const)
+      .filter(([, logDelta]) => logDelta > Math.log(3e-7) && logDelta < Math.log(3e-4));
+    expect(points.length).toBeGreaterThan(100);
+    const meanX = points.reduce((sum, [x]) => sum + x, 0) / points.length;
+    const meanY = points.reduce((sum, [, y]) => sum + y, 0) / points.length;
+    let sxx = 0;
+    let sxy = 0;
+    for (const [x, y] of points) {
+      sxx += (x - meanX) ** 2;
+      sxy += (x - meanX) * (y - meanY);
+    }
+    const measuredKappa = sxy / sxx;
+    const analyticKappa = 1 / (Math.sqrt(3) * M);
+
+    // Measured 1.2e-5, independent of the integration tolerance and of epsilon: the
+    // residual is the O(delta) nonlinear term inside the fit window, not numerical error.
+    expect(Math.abs(measuredKappa / analyticKappa - 1)).toBeLessThan(1e-4);
+
+    // And the growth per half orbit is e^pi: kappa * (half-period in lambda).
+    const halfPeriodAffine = Math.PI / (criticalImpactParameter(M) / (rPhoton * rPhoton));
+    expect(measuredKappa * halfPeriodAffine).toBeCloseTo(Math.PI, 3);
+  });
+
+  it('holds the unperturbed circular orbit exactly in the Hamiltonian formulation', () => {
     const f = model.lapseFunction(rPhoton);
     const k: Vec4 = [1 / f, 0, 0, criticalImpactParameter(M) / (rPhoton * rPhoton)];
-
-    const unperturbed = integrateGeodesic({
+    const result = integrateGeodesic({
       model,
-      integrator: integrator({ absolute: 1e-14, relative: 1e-14 }),
+      integrator: new Dopri5Integrator(STATE_DIM, { tolerance: { absolute: 1e-12, relative: 1e-12 } }),
       initial: nullState([0, rPhoton, Math.PI / 2, 0], k),
-      limits: { initialStep: 1e-4, parameterMax: 150, maxSteps: 2_000_000, maxStep: 0.05 },
+      limits: { initialStep: 1e-3, parameterMax: 300, maxSteps: 1_000_000, maxStep: 0.1 },
     });
-    // By lambda = 150M, rounding in the initial data alone has grown to order unity.
-    expect(Math.abs(unperturbed.final.position_x[1] - rPhoton)).toBeGreaterThan(1);
+    // Over some 27 orbits the radius stays at 3M: the equilibrium is exact, and nothing
+    // in the Hamiltonian discretization perturbs it.
+    const check = checkTolerance(PHOTON_SPHERE_LOCK, result.final.position_x[1] - rPhoton);
+    expect(check.withinTolerance, check.message).toBe(true);
+    expect(result.final.position_x[3] / (2 * Math.PI)).toBeGreaterThan(25);
+  });
 
-    // An explicit outward perturbation escapes outward.
+  it('lets an explicit outward perturbation escape to large radius', () => {
+    const f = model.lapseFunction(rPhoton);
+    const k: Vec4 = [1 / f, 0, 0, criticalImpactParameter(M) / (rPhoton * rPhoton)];
     const perturbed = integrateGeodesic({
       model,
-      integrator: integrator({ absolute: 1e-14, relative: 1e-14 }),
+      integrator: new Dopri5Integrator(STATE_DIM, { tolerance: { absolute: 1e-12, relative: 1e-12 } }),
       initial: nullState([0, rPhoton * (1 + 1e-8), Math.PI / 2, 0], k),
       limits: { initialStep: 1e-4, parameterMax: 300, maxSteps: 2_000_000, maxStep: 0.05 },
     });

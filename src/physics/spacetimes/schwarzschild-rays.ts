@@ -1,9 +1,10 @@
 import type { Vec4 } from '../core/indices.js';
 import { nullState, type PhaseSpaceState } from '../core/phase-space.js';
-import { geodesicDerivative } from '../geodesic/geodesic-system.js';
+import { HAMILTONIAN, type GeodesicFormulation } from '../geodesic/formulation.js';
 import { integrateGeodesic, type IntegrationLimits } from '../geodesic/integrate.js';
 import type { Integrator } from '../geodesic/integrators/integrator.js';
 import { asymptoticSweepTail } from './schwarzschild-analytic.js';
+import type { CartesianVec3 } from './spacetime-model.js';
 import { photonSphereRadius, type SchwarzschildModel } from './schwarzschild.js';
 
 /**
@@ -85,11 +86,13 @@ export function isCaptured(model: SchwarzschildModel, position_x: Vec4, tangent:
 export interface DeflectionMeasurement {
   /** True when the ray fell in rather than escaping. */
   readonly captured: boolean;
+  /** Which formulation of the geodesic equation was integrated. */
+  readonly formulation: string;
   /** The asymptotic deflection angle, in radians. Undefined for a captured ray. */
   readonly deflectionAngle?: number;
   /** Total azimuthal sweep actually integrated, between the start and end radii. */
   readonly sweptAngle: number;
-  /** Smallest radius reached. */
+  /** Radius at the located turning point; NaN for a captured ray, which has none. */
   readonly minimumRadius: number;
   /** Radius at which the trace actually ended, which overshoots the requested one. */
   readonly endRadius?: number;
@@ -110,6 +113,8 @@ export interface DeflectionOptions {
   /** Radius at which the ray starts inbound and at which it is considered escaped. */
   readonly startRadius: number;
   readonly limits?: Partial<IntegrationLimits>;
+  /** Defaults to the Hamiltonian formulation. */
+  readonly formulation?: GeodesicFormulation;
 }
 
 /**
@@ -146,15 +151,13 @@ export function measureDeflection(options: DeflectionOptions): DeflectionMeasure
   const initial = equatorialNullRay(model, startRadius, impactParameter, 'ingoing');
   const energy_E = 1;
   const angular_momentum_Lz = impactParameter;
-
-  let minimumRadius = startRadius;
-  let turnedAround = false;
+  const formulation = options.formulation ?? HAMILTONIAN;
 
   const result = integrateGeodesic({
     model,
     integrator,
     initial,
-    derivative: geodesicDerivative(model),
+    session: formulation.bind(model),
     limits: {
       initialStep: 1e-3,
       parameterMax: 200 * startRadius,
@@ -162,26 +165,47 @@ export function measureDeflection(options: DeflectionOptions): DeflectionMeasure
       minStep: 1e-14,
       ...options.limits,
     },
-    terminator: (position_x, tangent) => {
-      const r = position_x[1];
-      if (r < minimumRadius) minimumRadius = r;
-      if (tangent[1] > 0) turnedAround = true;
-      if (isCaptured(model, position_x, tangent)) return true;
-      return turnedAround && r >= startRadius;
-    },
+    events: [
+      {
+        // The turning point: k^r passes from negative to positive. Located exactly, so
+        // the closest approach is measured rather than sampled at step boundaries.
+        id: 'periapsis',
+        value: (_x, tangent) => tangent[1],
+        direction: 1,
+        terminal: false,
+      },
+      {
+        // Return to the starting radius, moving outward. Terminal, and located exactly,
+        // so the trace ends on r = r_start instead of one step beyond it.
+        id: 'escape',
+        value: (x) => x[1] - startRadius,
+        direction: 1,
+        terminal: true,
+      },
+    ],
+    terminator: (position_x, tangent) => isCaptured(model, position_x, tangent),
   });
+
+  const periapsis = result.events.find((event) => event.id === 'periapsis');
+  const minimumRadius = periapsis ? periapsis.state.position_x[1] : Number.NaN;
 
   const final = result.final;
   const captured = isCaptured(model, final.position_x, final.tangent);
 
-  // E and L_z read straight off the tangent, using the same relations the setup used.
-  const f = model.lapseFunction(final.position_x[1]);
-  const finalEnergy = f * final.tangent[0];
-  const finalAngularMomentum =
-    final.position_x[1] *
-    final.position_x[1] *
-    Math.sin(final.position_x[2]) ** 2 *
-    final.tangent[3];
+  // E = -p_t and L_z = p_phi. In the Hamiltonian formulation these are read straight
+  // from the integrated covariant momentum, where they are conserved by construction; in
+  // the Lagrangian formulation they are rebuilt from the contravariant tangent.
+  let finalEnergy: number;
+  let finalAngularMomentum: number;
+  if (result.formulation === 'hamiltonian') {
+    finalEnergy = -result.packed[4];
+    finalAngularMomentum = result.packed[7];
+  } else {
+    const f = model.lapseFunction(final.position_x[1]);
+    finalEnergy = f * final.tangent[0];
+    finalAngularMomentum =
+      final.position_x[1] * final.position_x[1] * Math.sin(final.position_x[2]) ** 2 * final.tangent[3];
+  }
 
   const metric = model.metricAt(final.position_x);
   let nullResidual = 0;
@@ -193,6 +217,7 @@ export function measureDeflection(options: DeflectionOptions): DeflectionMeasure
 
   const measurement: DeflectionMeasurement = {
     captured,
+    formulation: result.formulation,
     sweptAngle,
     minimumRadius,
     steps: result.steps,
@@ -213,4 +238,68 @@ export function measureDeflection(options: DeflectionOptions): DeflectionMeasure
     endRadius,
     deflectionAngle: sweptAngle + tailIn + tailOut - Math.PI,
   };
+}
+
+/**
+ * The direction a ray is travelling *at infinity*, from its state at finite radius R.
+ *
+ * A ray is still being bent at any finite radius, so reading the background off the
+ * local propagation direction at r = R biases the image by the deflection still to come.
+ * The bias is systematic and scales as M b / R^2: 2.5e-4 rad for b = 10M at R = 200M,
+ * about a third of a pixel at 1000 px across. It is removed exactly here.
+ *
+ * For an outgoing ray, the direction of motion at infinity is parallel to the position
+ * vector at infinity. By spherical symmetry the position keeps sweeping, within the
+ * orbital plane, through the exact tail angle T(b, R) = asymptoticSweepTail(M, b, R), so
+ *
+ *   n_infinity = cos(T) r_hat + sin(T) t_hat
+ *
+ * with r_hat the radial unit vector at R and t_hat the in-plane unit vector along the
+ * tangential motion. The impact parameter comes from the static-frame direction at R:
+ * a photon arriving at angle psi from radial has b = R sin(psi) / sqrt(f(R)).
+ *
+ * In flat space T = asin(b/R) = psi, and this reduces to the local direction, as it must.
+ * `tests/visualization/asymptotic-direction.test.ts` checks the correction the useful
+ * way: the corrected direction must not depend on which R the trace stopped at.
+ */
+export function asymptoticDirection(
+  model: SchwarzschildModel,
+  positionWorld: CartesianVec3,
+  directionWorld: CartesianVec3,
+): CartesianVec3 {
+  const R = Math.hypot(positionWorld[0], positionWorld[1], positionWorld[2]);
+  const speed = Math.hypot(directionWorld[0], directionWorld[1], directionWorld[2]);
+  if (!(R > 0) || !(speed > 0)) {
+    throw new RangeError('asymptoticDirection: degenerate position or direction.');
+  }
+
+  const rHat: CartesianVec3 = [positionWorld[0] / R, positionWorld[1] / R, positionWorld[2] / R];
+  const radial =
+    (directionWorld[0] * rHat[0] + directionWorld[1] * rHat[1] + directionWorld[2] * rHat[2]) / speed;
+  if (!(radial > 0)) {
+    throw new RangeError(
+      'asymptoticDirection: the ray is not moving outward, so it has no asymptotic ' +
+        'direction from here.',
+    );
+  }
+
+  const perpendicular: CartesianVec3 = [
+    directionWorld[0] / speed - radial * rHat[0],
+    directionWorld[1] / speed - radial * rHat[1],
+    directionWorld[2] / speed - radial * rHat[2],
+  ];
+  const sinPsi = Math.hypot(perpendicular[0], perpendicular[1], perpendicular[2]);
+  if (sinPsi < 1e-15) return rHat; // purely radial: no further bending.
+
+  const tHat: CartesianVec3 = [
+    perpendicular[0] / sinPsi,
+    perpendicular[1] / sinPsi,
+    perpendicular[2] / sinPsi,
+  ];
+  const f = model.lapseFunction(R);
+  const b = (R * sinPsi) / Math.sqrt(f);
+  const T = asymptoticSweepTail(model.M, b, R);
+  const c = Math.cos(T);
+  const s = Math.sin(T);
+  return [c * rHat[0] + s * tHat[0], c * rHat[1] + s * tHat[1], c * rHat[2] + s * tHat[2]];
 }

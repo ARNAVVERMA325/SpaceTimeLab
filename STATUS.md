@@ -12,7 +12,7 @@ every validation test listed under it is passing — not when the code merely ru
 render looks correct (`CLAUDE.md` §16: "A result is not considered validated merely
 because it 'looks right.'").
 
-**Last updated:** 2026-09-21 — Milestone 2A gate closed.
+**Last updated:** 2026-09-23 — engine rebuilt (Hamiltonian formulation, Dormand–Prince, exact event location); renderer bias removed; supersampling added.
 
 ---
 
@@ -39,8 +39,8 @@ because it 'looks right.'").
 | M5A — 3+1 embedding & GWOSC strain (committed scope) | `not started` |
 | M5B — SXS / EHT (stretch, exploratory) | `not started` |
 
-Milestones 1 and 2A are closed: all of their validation tests pass in CI, 145 tests
-across 13 files. Everything below M2A remains unimplemented, and those rows read
+Milestones 1 and 2A are closed: all of their validation tests pass in CI, 185 tests
+across 17 files. Everything below M2A remains unimplemented, and those rows read
 `not run` because the corresponding physics code does not exist yet.
 
 **M2B is unblocked.** The roadmap is explicit that no shader work starts before the
@@ -151,16 +151,17 @@ via backward ray tracing. **Both met.**
 
 | Validation test (`ROADMAP.md` 2A.4) | Status | Measured |
 | --- | --- | --- |
-| Photon sphere locks at `r = 3M` | `pass` | `\|r - 3M\| = 5.9e-13` over 4.6 orbits |
-| Photon-sphere instability demonstrated | `pass` | departs by `lambda = 150M`, e-folds every ~1.8 |
+| Photon sphere locks at `r = 3M` | `pass` | exact fixed point in the Hamiltonian form, held over ~27 orbits |
+| Photon-sphere Lyapunov exponent vs. `1/(3 sqrt(3) M)` | `pass` | `1.2e-5` relative; growth per half orbit `e^pi` |
 | Capture threshold vs. `b_c = 3 sqrt(3) M` | `pass` | `1.8e-10` relative, by bisection |
-| `energy_E = -p_t` relative drift `< 1e-6` | `pass` | `<= 6.3e-12` |
-| `angular_momentum_Lz = p_phi` relative drift `< 1e-6` | `pass` | `<= 1.4e-9` |
+| `energy_E = -p_t` relative drift `< 1e-6` | `pass` | **exactly zero** — `p_t` bit-identical after integration |
+| `angular_momentum_Lz = p_phi` relative drift `< 1e-6` | `pass` | **exactly zero** — `p_phi` bit-identical after integration |
 | Weak-field deflection vs. analytical `alpha ~ 4GM/(c^2 b)` | `pass` | ratio → 1 as `1/b`: 1.0302, 1.0030, 1.00029, 1.000029 |
 | Traced deflection vs. exact orbit-equation quadrature | `pass` | `2e-13` to `6.4e-9` relative, `r_0` from 3.2M to 10^4 M |
 | Flat-space limit recovered as `M -> 0` (`CLAUDE.md` §16) | `pass` | mass-sourced symbols vanish linearly in M |
 | Analytic vs. numerically differenced Christoffels | `pass` | `<= 1.6e-8` relative |
-| Null normalization along traced rays | `pass` | `<= 1.8e-11` |
+| Null normalization along traced rays | `pass` | `<= 5.1e-10` over a full image at render tolerance `1e-10` |
+| Background direction independent of stopping radius | `pass` | `< 1e-10` from R = 100M to 5000M; uncorrected bias falls as `1/R^2` |
 | Shadow angular radius vs. `sin(psi) = b_c sqrt(f)/r` | `pass` | `< 1e-6` relative |
 | Orbital-plane reduction vs. full 3D integration | `pass` | exit directions agree to `< 1e-8`; ray stays in-plane to `< 1e-9` |
 
@@ -179,6 +180,29 @@ ground truth every later GPU or Kerr result is checked against.
   the orbital-plane reduction, and a chart-agnostic raytracer producing the shadow and
   the lensed background.
 
+**Engine, rebuilt after the gate first closed** (2026-09-23). A second pass, looking
+for what a referee would object to, found the gate passing on an engine with avoidable
+weaknesses. All M2A rows above were re-measured on the new engine.
+
+| Change | Why | Measured effect |
+| --- | --- | --- |
+| Hamiltonian formulation `(x^mu, p_mu)`, `H = 1/2 g^{mu nu} p_mu p_nu`, now the default | `CLAUDE.md` §2 prefers it; momenta conjugate to ignorable coordinates are conserved by construction | `E`, `L_z` exact; 12x smaller deflection error at equal tolerance, 30% fewer steps. The null constraint becomes the one drifting invariant, and is reported |
+| Dormand–Prince 5(4) with FSAL and Shampine's continuous extension, replacing Fehlberg 4(5) as the default | Fehlberg's error constants suit the fourth-order solution, not the propagated fifth | 5th order confirmed; dense output `O(h^5)`; at every tolerance tried, smaller error for fewer steps than Fehlberg |
+| Exact event location: Brent on the dense output, then a Newton-refined landing step | Terminations previously overshot by up to a step — the cause of the 150% deflection error found during 2A | Events land on their surface to `< 1e-11`, independent of tolerance |
+| Exact asymptotic background direction via the orbit-equation tail integral | Sampling the sky at finite `R` biased every ray by the deflection still to come | Bias removed; result independent of `R` to `1e-10` |
+| Stratified supersampling in linear light | `CLAUDE.md` §9 step 7 | Converges at the stratified-sampling rate `O(N^-3/4)`, ratios 2.5–3.0 per doubling |
+| Curved-space convergence test | `CLAUDE.md` §16 asked for convergence; it existed only for a harmonic oscillator | RK4 4th order on a Schwarzschild deflection: ratios 15.8, 15.9 |
+
+Combined, a full Schwarzschild render at tolerance `1e-10` is 2.8x faster with a 33x
+smaller worst null residual than before, which lets the interactive render meet the
+reference `1e-9` gate. The separate "preview" tolerance introduced when the gate first
+closed has been retired.
+
+Two tests were found to be checking numerical artifacts rather than physics and were
+replaced: the photon-sphere "instability" test relied on Christoffel rounding to seed the
+departure (the Hamiltonian form holds the orbit exactly, which is the correct solution),
+and is now a measurement of the Lyapunov exponent.
+
 **Decisions closed:**
 
 - **Horizon detection** reads `f = 1 - 2M/r` from the metric components in use, never the
@@ -193,21 +217,23 @@ ground truth every later GPU or Kerr result is checked against.
   in each ray's own orbital plane — exact under spherical symmetry — so `sin(theta) = 1`
   throughout and the axis is never approached. Cross-validated against full 3D
   integration, and refused outright for a chart or a symmetry that does not support it.
-- **Preview vs. reference tolerance.** The interactive render integrates at `1e-10` and is
-  judged against `null-normalization-preview` (`1e-7`, measured `1.7e-8`); the validated
-  results use `null-normalization-traced` (`1e-9`, measured `1.8e-11`). Two named
-  tolerances rather than one relaxed gate, per `CLAUDE.md` §17. The UI states which it is
-  showing.
+- **One tolerance for render and tests.** The interactive render integrates at `1e-10` and
+  is judged against the same `null-normalization-traced` gate (`1e-9`) as the test suite,
+  measured `5.1e-10`. The earlier separate preview tolerance is retired.
 
 **Known limitations, deliberately not papered over:**
 
-- Throughput is roughly 77k rays in 11.6 s for the black hole on the reference machine.
-  This is the CPU reference path; 60 FPS is M2B's goal and `CLAUDE.md` §21 is explicit it
-  is not a validity requirement.
-- The fine bands near the shadow edge alias into stippling. Approaching the capture
-  boundary the lensing map compresses an unbounded sequence of sky images into a
-  vanishing angular width, which no finite ray count resolves. No anti-aliasing is
-  applied, since smoothing must not stand in for resolving the structure (`CLAUDE.md` §9).
+- Throughput is about 3.5k rays/s single-threaded on the reference machine (30k rays in
+  8 s). This is the CPU reference path; 60 FPS is M2B's goal and `CLAUDE.md` §21 is
+  explicit it is not a validity requirement.
+- The finest bands near the shadow edge alias at any sample count: each successive band
+  is `e^pi ~ 23` times thinner than the last, so no finite ray count resolves them all.
+  Supersampling averages them correctly in linear light; it does not and cannot resolve
+  them.
+- `equatorialNullRay` builds `k^r` from `E^2 - f L^2/r^2`, which cancels catastrophically
+  for a ray both near-critical and near `r = 3M` (the difference falls below rounding at
+  `delta r ~ 1e-9 M`). It throws rather than returning a wrong ray; the Lyapunov test
+  builds its initial data from the factored form instead.
 - The exact-deflection quadrature is refused for `r_0 < 3.05M`, where the integrand
   approaches a double root, rather than returning a quietly inaccurate value. It also
   loses *relative* accuracy in the far weak field, where `alpha = 4*Integral - pi`
@@ -350,7 +376,7 @@ Carried here so a session picking up mid-project can see them in one place.
 | 4 | **GPU f32 vs. CPU f64 cross-validation tolerance** | M2B | open |
 | 5 | Carter constant convention (not a tolerance, but must be fixed before M4A) | M4A | open |
 | 6 | Kerr–Schild vs. Boyer–Lindquist exterior agreement tolerance | M4B | open |
-| 7 | Preview vs. reference null-residual tolerance | M2A | **closed** — `1e-7` preview / `1e-9` reference, both measured |
+| 7 | Preview vs. reference null-residual tolerance | M2A | **closed** — preview tolerance retired; render meets the `1e-9` reference gate at `5.1e-10` |
 
 `CLAUDE.md` §17: there is no universal numerical-error threshold. Each entry above must
 be justified by the relevant numerical method and quantity when it is closed.

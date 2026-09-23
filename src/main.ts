@@ -1,6 +1,6 @@
 import type { Vec4 } from './physics/core/indices.js';
 import type { Integrator } from './physics/geodesic/integrators/integrator.js';
-import { RKF45Integrator } from './physics/geodesic/integrators/rkf45.js';
+import { Dopri5Integrator } from './physics/geodesic/integrators/dopri5.js';
 import { STATE_DIM } from './physics/geodesic/state-vector.js';
 import {
   defaultScreen,
@@ -16,12 +16,8 @@ import {
   photonSphereRadius,
   schwarzschild,
 } from './physics/spacetimes/schwarzschild.js';
-import { isCaptured } from './physics/spacetimes/schwarzschild-rays.js';
+import { asymptoticDirection, isCaptured } from './physics/spacetimes/schwarzschild-rays.js';
 import type { SpacetimeModel } from './physics/spacetimes/spacetime-model.js';
-import {
-  NULL_NORMALIZATION_PREVIEW,
-  NULL_NORMALIZATION_TRACED,
-} from './physics/validation/tolerances.js';
 import { buildProvenanceReport, type ProvenanceEntry } from './ui/provenance.js';
 import { renderToCanvas } from './visualization/canvas-renderer.js';
 import { DEFAULT_CELESTIAL_GRID } from './visualization/celestial-grid.js';
@@ -53,21 +49,21 @@ interface Scene {
 }
 
 /**
- * Preview integration tolerance.
+ * Integration tolerance for the interactive render.
  *
- * Looser than the test suite's reference setting, and paired with
- * NULL_NORMALIZATION_PREVIEW so the reported health describes the preview rather than
- * failing against a gate it was never asked to meet. This lowers a numerical budget,
- * not the physical model (CLAUDE.md §1.1, §21).
+ * With the Hamiltonian formulation and Dormand-Prince, 1e-10 keeps the worst null
+ * residual over a whole image at 5.1e-10 — inside the same 1e-9 gate the test suite
+ * uses — so the picture on screen is held to the validated standard rather than a
+ * looser preview one.
  */
-const PREVIEW_TOLERANCE = { absolute: 1e-10, relative: 1e-10 };
+const RENDER_TOLERANCE = { absolute: 1e-10, relative: 1e-10 };
 
 const BLACK_HOLE_MASS = 1;
 const CAMERA_RADIUS = 20;
 
 function buildScenes(): readonly Scene[] {
-  const integrator: Integrator = new RKF45Integrator(STATE_DIM, {
-    tolerance: PREVIEW_TOLERANCE,
+  const integrator: Integrator = new Dopri5Integrator(STATE_DIM, {
+    tolerance: RENDER_TOLERANCE,
   });
 
   const flatObserver = staticMinkowskiObserver([0, 0, 0, 0]);
@@ -99,7 +95,8 @@ function buildScenes(): readonly Scene[] {
         limits: { initialStep: 1e-3, parameterMax: 20_000, maxSteps: 200_000, maxStep: 5 },
         captureTest: (position_x: Vec4, tangent: Vec4) => isCaptured(holeModel, position_x, tangent),
         orbitalPlaneReduction: true,
-        residualTolerance: NULL_NORMALIZATION_PREVIEW,
+        asymptoticDirection: (positionWorld, directionWorld) =>
+          asymptoticDirection(holeModel, positionWorld, directionWorld),
       },
       caption:
         'Computed appearance of the background grid for the selected spacetime, observer ' +
@@ -139,16 +136,25 @@ function buildScenes(): readonly Scene[] {
             'r = 2M, where these coordinates break down.',
         },
         {
-          label: 'Sampling and aliasing',
-          value: 'One ray per pixel, no anti-aliasing',
+          label: 'Background direction',
+          value: 'Exact direction at infinity',
           note:
-            'The stippling in the fine bands hugging the shadow is aliasing, and it is ' +
-            'showing you something real. Approaching the capture boundary, the lensing map ' +
-            'compresses an unbounded sequence of images of the whole sky into a vanishing ' +
-            'angular width, so no finite ray count can resolve it. That is a sampling limit ' +
-            'of this render, not an error in the trajectories. No smoothing is applied: ' +
-            'anti-aliasing is a rendering operation and must not be allowed to stand in for ' +
-            'resolving the structure (CLAUDE.md §9).',
+            'Rays are integrated to r = 200M, but a ray is still being bent there, so ' +
+            'reading the sky off its local direction would bias the image by the deflection ' +
+            'still to come (2.5e-4 rad for b = 10M). The remaining sweep to infinity is ' +
+            'added exactly from the orbit-equation tail integral, so the result does not ' +
+            'depend on the radius the integration stopped at.',
+        },
+        {
+          label: 'Sampling and aliasing',
+          value: 'Stratified supersampling, averaged in linear light',
+          note:
+            'Every sample is an independent, fully integrated geodesic; accumulation only ' +
+            'averages their colours, so no trajectory is altered (CLAUDE.md §9). The finest ' +
+            'bands hugging the shadow still alias at any sample count: approaching the ' +
+            'capture boundary the lensing map compresses an unbounded sequence of sky images ' +
+            'into a vanishing width, and each successive band is e^pi ~ 23 times thinner ' +
+            'than the last.',
         },
         {
           label: 'Integration domain',
@@ -172,7 +178,6 @@ function buildScenes(): readonly Scene[] {
         integrator,
         grid: flatGrid,
         limits: { initialStep: 0.5, maxStep: 10, parameterMax: 1000, maxSteps: 10_000 },
-        residualTolerance: NULL_NORMALIZATION_TRACED,
       },
       caption:
         'Flat spacetime: the pipeline bends nothing, so the sky grid arrives exactly as a ' +
@@ -235,6 +240,7 @@ async function main(): Promise<void> {
   const hierarchy = element<HTMLElement>('data-hierarchy');
   const sceneSelect = element<HTMLSelectElement>('scene');
   const resolutionSelect = element<HTMLSelectElement>('resolution');
+  const samplesSelect = element<HTMLSelectElement>('samples');
   const renderButton = element<HTMLButtonElement>('render');
 
   const scenes = buildScenes();
@@ -252,11 +258,16 @@ async function main(): Promise<void> {
     const scene = scenes.find((s) => s.id === sceneSelect.value) ?? scenes[0];
     const width = Number.parseInt(resolutionSelect.value, 10);
     const screen = scene.screen(width, Math.round((width * 3) / 4));
-    const config: TraceConfig = { ...scene.config, observer: scene.observer };
+    const samplesPerAxis = Number.parseInt(samplesSelect.value, 10);
+    const config: TraceConfig = {
+      ...scene.config,
+      observer: scene.observer,
+      sampling: { samplesPerAxis, seed: 1 },
+    };
 
     renderButton.disabled = true;
     status.dataset.health = '';
-    status.textContent = `Tracing ${screen.widthPx * screen.heightPx} null geodesics...`;
+    status.textContent = `Tracing ${screen.widthPx * screen.heightPx * samplesPerAxis * samplesPerAxis} null geodesics...`;
     headline.textContent = scene.caption;
 
     const started = performance.now();
@@ -304,6 +315,7 @@ async function main(): Promise<void> {
 
   sceneSelect.addEventListener('change', () => void run());
   resolutionSelect.addEventListener('change', () => void run());
+  samplesSelect.addEventListener('change', () => void run());
   renderButton.addEventListener('click', () => void run());
 
   await run();

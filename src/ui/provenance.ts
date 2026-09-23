@@ -1,3 +1,4 @@
+import { HAMILTONIAN, type GeodesicFormulation } from '../physics/geodesic/formulation.js';
 import type { Integrator } from '../physics/geodesic/integrators/integrator.js';
 import type { Observer } from '../physics/observer/observer.js';
 import type { SpacetimeModel } from '../physics/spacetimes/spacetime-model.js';
@@ -46,6 +47,8 @@ export function buildProvenanceReport(options: {
   readonly integrator: Integrator;
   readonly diagnostics: RenderDiagnostics;
   readonly backgroundRadius: number;
+  /** The formulation integrated; defaults to the renderer's default, Hamiltonian. */
+  readonly formulation?: GeodesicFormulation;
   /** Scene-specific entries, appended after the shared ones. */
   readonly sceneEntries?: readonly ProvenanceEntry[];
 }): ProvenanceReport {
@@ -94,6 +97,11 @@ export function buildProvenanceReport(options: {
       note: observer.description,
     },
     {
+      label: 'Geodesic formulation',
+      value: (options.formulation ?? HAMILTONIAN).displayName,
+      note: (options.formulation ?? HAMILTONIAN).description,
+    },
+    {
       label: 'Numerical method',
       value: integrator.displayName,
       note: integrator.description,
@@ -127,19 +135,6 @@ export function buildProvenanceReport(options: {
         'A visualization mapping, not a physical emitting surface. It carries no emission ' +
         'model and no spectrum.',
     },
-    {
-      label: 'Image projection',
-      value: 'Rectilinear pinhole projection of the celestial sphere',
-      note:
-        'Curvature visible in the grid lines is projection geometry, not light deflection. ' +
-        'A rectilinear camera maps great circles to straight lines, so meridians (constant ' +
-        'azimuth) appear straight, while parallels (constant polar angle) are small circles ' +
-        'and appear curved -- the equator excepted, since it is a great circle. In flat ' +
-        'spacetime this image is identical, pixel for pixel, to sampling the grid along ' +
-        'each pixel\'s initial viewing direction with no integration at all, which is what ' +
-        'the M1 validation suite asserts. Any deviation from that reference would be a ' +
-        'defect, not lensing.',
-    },
   ];
 
   const nullResidualText = Number.isFinite(diagnostics.maxNullResidual)
@@ -166,7 +161,8 @@ export function buildProvenanceReport(options: {
     {
       label: 'Rays traced',
       value:
-        `${diagnostics.raysTraced} total — ${diagnostics.raysReachingBackground} reached ` +
+        `${diagnostics.raysTraced} total at ${diagnostics.samplesPerPixel} per pixel — ` +
+        `${diagnostics.raysReachingBackground} reached ` +
         `the background, ${diagnostics.raysCaptured} were captured, ` +
         `${diagnostics.raysFailed} failed numerically`,
     },

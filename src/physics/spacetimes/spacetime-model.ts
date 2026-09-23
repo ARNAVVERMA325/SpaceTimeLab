@@ -184,4 +184,31 @@ export interface SpacetimeModel {
 
   /** Whether the event lies in this chart's valid domain (CLAUDE.md §6.1). */
   domainCheck(x: Vec4): DomainStatus;
+
+  /**
+   * Write g_mu_nu into a caller-owned 16-entry buffer, index mu*4 + nu.
+   *
+   * The allocation-free counterpart of `metricAt`. Used once per ray to lower the
+   * initial tangent into a covariant momentum for the Hamiltonian formulation.
+   */
+  metricInto(x: Vec4, out: Float64Array): void;
+
+  /**
+   * Write g^{mu nu} into a caller-owned 16-entry buffer, index mu*4 + nu.
+   *
+   * On the Hamiltonian hot path: dx^mu/dlambda = g^{mu nu} p_nu is evaluated from it at
+   * every stage of every step.
+   */
+  inverseMetricInto(x: Vec4, out: Float64Array): void;
+
+  /**
+   * Write the partial derivatives d_alpha g^{mu nu} into a caller-owned 64-entry buffer,
+   * index alpha*16 + mu*4 + nu.
+   *
+   * The only geometric input the Hamiltonian equations need besides g^{mu nu} itself:
+   * dp_mu/dlambda = -1/2 (d_mu g^{alpha beta}) p_alpha p_beta. Models supply these in
+   * closed form; `tests/physics/hamiltonian.test.ts` checks every model's derivatives
+   * against central differences of its own `inverseMetricInto`.
+   */
+  inverseMetricDerivativesInto(x: Vec4, out: Float64Array): void;
 }

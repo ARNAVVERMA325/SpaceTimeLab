@@ -71,8 +71,29 @@ export function turningPointForImpactParameter(
   return 0.5 * (lo + hi);
 }
 
-/** Nodes and weights for n-point Gauss-Legendre quadrature on [0, 1]. */
-function gaussLegendreUnitInterval(n: number): { nodes: Float64Array; weights: Float64Array } {
+interface QuadratureRule {
+  readonly nodes: Float64Array;
+  readonly weights: Float64Array;
+}
+
+const quadratureCache = new Map<number, QuadratureRule>();
+
+/**
+ * Nodes and weights for n-point Gauss-Legendre quadrature on [0, 1], memoized.
+ *
+ * Finding the roots costs O(n^2) per rule with Newton iteration, which is fine once but
+ * not once per ray: the asymptotic-direction correction evaluates a tail integral for
+ * every escaping ray in an image.
+ */
+export function gaussLegendreUnitInterval(n: number): QuadratureRule {
+  const cached = quadratureCache.get(n);
+  if (cached) return cached;
+  const rule = computeGaussLegendre(n);
+  quadratureCache.set(n, rule);
+  return rule;
+}
+
+function computeGaussLegendre(n: number): QuadratureRule {
   const nodes = new Float64Array(n);
   const weights = new Float64Array(n);
 
@@ -197,11 +218,21 @@ export function deflectionAngleExact(
  * treating the region beyond r_start as flat and adding arcsin(b / r_start), is only the
  * M -> 0 limit of this integral and leaves an O(M / r_start) error.
  */
+/**
+ * Default node count for the tail integral.
+ *
+ * The tail integrand is far smoother than the full deflection integrand, since the lower
+ * limit r_start lies outside the turning point. Measured against a 256-node rule over
+ * r_start in [20M, 1000M] and b up to 0.9 r_start: 16 nodes give 3.6e-13, 24 give
+ * 2.4e-15 absolute. 24 is used, at about 0.1 microseconds per evaluation.
+ */
+export const TAIL_QUADRATURE_NODES = 24;
+
 export function asymptoticSweepTail(
   M: number,
   b: number,
   rStart: number,
-  nodes = DEFLECTION_QUADRATURE_NODES,
+  nodes = TAIL_QUADRATURE_NODES,
 ): number {
   const { nodes: u, weights } = gaussLegendreUnitInterval(nodes);
   const scale = (rStart * rStart) / (b * b);

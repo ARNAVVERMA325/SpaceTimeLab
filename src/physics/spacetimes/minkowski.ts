@@ -155,6 +155,23 @@ class MinkowskiSpacetime implements SpacetimeModel {
     // The Cartesian chart covers all of Minkowski spacetime.
     return IN_DOMAIN;
   }
+
+  metricInto(_x: Vec4, out: Float64Array): void {
+    for (let i = 0; i < 16; i += 1) out[i] = G_COMPONENTS[i];
+  }
+
+  inverseMetricInto(_x: Vec4, out: Float64Array): void {
+    // diag(-1,1,1,1) is its own inverse.
+    for (let i = 0; i < 16; i += 1) out[i] = G_COMPONENTS[i];
+  }
+
+  inverseMetricDerivativesInto(_x: Vec4, out: Float64Array): void {
+    if (out.length !== 64) {
+      throw new RangeError('inverseMetricDerivativesInto expects a 64-entry buffer.');
+    }
+    // Constant components: every derivative vanishes identically.
+    out.fill(0);
+  }
 }
 
 export const minkowski: SpacetimeModel = new MinkowskiSpacetime();

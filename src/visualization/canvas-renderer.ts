@@ -79,5 +79,5 @@ export async function renderToCanvas(
     await nextFrame();
   }
 
-  return finalizeRender(accumulator);
+  return finalizeRender(accumulator, config);
 }

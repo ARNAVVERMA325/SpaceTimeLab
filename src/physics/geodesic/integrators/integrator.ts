@@ -44,6 +44,20 @@ export interface Integrator {
    * unchanged. The caller owns the parameter bookkeeping.
    */
   step(f: DerivativeFn, p: number, y: Float64Array, h: number): StepResult;
+
+  /**
+   * Continuous extension over the most recent *accepted* step: write the state at
+   * p_old + theta * h into `out`, for theta in [0, 1].
+   *
+   * This is what makes event location exact. Without it a termination can only be
+   * detected after the fact, and the state reported is wherever the last step happened
+   * to land — the overshoot that corrupted the first deflection measurement in
+   * Milestone 2A. Valid only until the next call to `step`.
+   */
+  interpolate?(theta: number, out: Float64Array): void;
+
+  /** Local order of the continuous extension, when one is provided. */
+  readonly denseOutputOrder?: number;
 }
 
 /**

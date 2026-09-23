@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { CONVENTIONS } from '../../src/physics/conventions.js';
 import { ChristoffelSymbols } from '../../src/physics/core/christoffel.js';
 import type { Vec4 } from '../../src/physics/core/indices.js';
 import { MetricTensor } from '../../src/physics/core/metric-tensor.js';
 import { nullState } from '../../src/physics/core/phase-space.js';
+import { HAMILTONIAN, LAGRANGIAN } from '../../src/physics/geodesic/formulation.js';
 import { integrateGeodesic } from '../../src/physics/geodesic/integrate.js';
 import { RK4Integrator } from '../../src/physics/geodesic/integrators/rk4.js';
 import { RKF45Integrator } from '../../src/physics/geodesic/integrators/rkf45.js';
 import { STATE_DIM } from '../../src/physics/geodesic/state-vector.js';
 import { minkowski } from '../../src/physics/spacetimes/minkowski.js';
-import { MINKOWSKI_CARTESIAN_CHART } from '../../src/physics/spacetimes/minkowski.js';
 import type { DomainStatus, SpacetimeModel } from '../../src/physics/spacetimes/spacetime-model.js';
 import { IN_DOMAIN } from '../../src/physics/spacetimes/spacetime-model.js';
 import { summarizeHealth } from '../../src/physics/validation/numeric-health.js';
+import { overrideModel } from '../helpers/model-override.js';
 
 /**
  * Geodesic driver behaviour (CLAUDE.md §17).
@@ -25,22 +25,12 @@ import { summarizeHealth } from '../../src/physics/validation/numeric-health.js'
 
 /** Base for test-only models: Minkowski geometry with one behaviour overridden. */
 function testModel(overrides: Partial<SpacetimeModel> & { id: string }): SpacetimeModel {
-  return {
+  return overrideModel(minkowski, {
     displayName: overrides.id,
-    classification: 'exact-analytical',
-    chart: MINKOWSKI_CARTESIAN_CHART,
-    conventions: CONVENTIONS,
-    parameters: {},
-    killingVectors: [],
-    symmetries: minkowski.symmetries,
-    geometry: minkowski.geometry,
     description: 'Test-only model. Not a physical spacetime.',
-    metricAt: (x: Vec4) => minkowski.metricAt(x),
-    christoffelAt: (x: Vec4) => minkowski.christoffelAt(x),
-    christoffelInto: (x: Vec4, out: Float64Array) => minkowski.christoffelInto(x, out),
-    domainCheck: (x: Vec4) => minkowski.domainCheck(x),
+    killingVectors: [],
     ...overrides,
-  } as SpacetimeModel;
+  });
 }
 
 describe('integration driver termination (CLAUDE.md §17)', () => {
@@ -145,6 +135,8 @@ describe('integration driver termination (CLAUDE.md §17)', () => {
       model: poisoned,
       integrator: new RK4Integrator(STATE_DIM),
       initial: nullState([0, 0, 0, 0], [1, 1, 0, 0]),
+      // The poison is in the Christoffel symbols, which only the Lagrangian form reads.
+      session: LAGRANGIAN.bind(poisoned),
       limits: { initialStep: 0.1, parameterMax: 100, maxSteps: 10_000 },
     });
 
@@ -163,7 +155,8 @@ describe('integration driver termination (CLAUDE.md §17)', () => {
     expect(d!.parameterName).toBe('lambda');
     expect(Number.isFinite(d!.parameterValue)).toBe(true);
     expect(d!.stepSize).toBeGreaterThan(0);
-    expect(d!.failedQuantity).toMatch(/^(x|tangent)\^[0-3]$/);
+    expect(d!.formulation).toBe('lagrangian');
+    expect(d!.failedQuantity).toMatch(/^(x|momentum)\^[0-3]$/);
     expect(d!.detail).toContain('no substitute value was invented');
   });
 
@@ -184,6 +177,7 @@ describe('integration driver termination (CLAUDE.md §17)', () => {
         tolerance: { absolute: 1e-18, relative: 1e-18 },
       }),
       initial: nullState([0, 0, 0, 0], [1, 1, 0, 0]),
+      session: LAGRANGIAN.bind(stiff),
       limits: { initialStep: 1, parameterMax: 100, maxSteps: 10_000, minStep: 1e-12 },
     });
 
@@ -191,6 +185,43 @@ describe('integration driver termination (CLAUDE.md §17)', () => {
     expect(result.diagnostics?.failedQuantity).toBe('step size');
     expect(result.diagnostics?.detail).toContain('cannot be met');
     expect(result.rejectedSteps).toBeGreaterThan(0);
+  });
+
+  it('detects a NaN in the Hamiltonian formulation too', () => {
+    // The same failure injected through the inverse-metric derivatives, which is the
+    // only geometric input the Hamiltonian right-hand side reads.
+    const poisoned = testModel({
+      id: 'poisoned-hamiltonian',
+      inverseMetricDerivativesInto: (x: Vec4, out: Float64Array) => {
+        out.fill(0);
+        if (x[1] > 1) out[1 * 16 + 1 * 4 + 1] = Number.NaN;
+      },
+    });
+
+    const result = integrateGeodesic({
+      model: poisoned,
+      integrator: new RK4Integrator(STATE_DIM),
+      initial: nullState([0, 0, 0, 0], [1, 1, 0, 0]),
+      session: HAMILTONIAN.bind(poisoned),
+      limits: { initialStep: 0.1, parameterMax: 100, maxSteps: 10_000 },
+    });
+
+    expect(result.reason).toBe('numerical-failure');
+    expect(result.diagnostics?.formulation).toBe('hamiltonian');
+    for (const v of result.final.position_x) expect(Number.isFinite(v)).toBe(true);
+    for (const v of result.final.tangent) expect(Number.isFinite(v)).toBe(true);
+  });
+
+  it('refuses a formulation session bound to a different model', () => {
+    const other = testModel({ id: 'other' });
+    expect(() =>
+      integrateGeodesic({
+        model: minkowski,
+        integrator: new RK4Integrator(STATE_DIM),
+        initial: nullState([0, 0, 0, 0], [1, 1, 0, 0]),
+        session: HAMILTONIAN.bind(other),
+      }),
+    ).toThrow(/bound to a different model/);
   });
 
   it('records the path only when asked', () => {

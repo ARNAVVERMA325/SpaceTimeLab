@@ -12,10 +12,8 @@ import {
   liftPosition,
   reduceToOrbitalPlane,
 } from '../../src/visualization/orbital-plane.js';
-import type {
-  CartesianVec3,
-  SpacetimeModel,
-} from '../../src/physics/spacetimes/spacetime-model.js';
+import type { CartesianVec3 } from '../../src/physics/spacetimes/spacetime-model.js';
+import { overrideModel } from '../helpers/model-override.js';
 
 /**
  * The orbital-plane reduction, checked against full three-dimensional integration.
@@ -234,22 +232,10 @@ describe('orbital-plane reduction', () => {
   });
 
   it('refuses a model that does not declare spherical symmetry', () => {
-    const axisymmetricOnly: SpacetimeModel = {
+    const axisymmetricOnly = overrideModel(model, {
       id: 'pretend-kerr',
-      displayName: model.displayName,
-      classification: model.classification,
-      chart: model.chart,
-      conventions: model.conventions,
-      parameters: model.parameters,
-      killingVectors: model.killingVectors,
-      geometry: model.geometry,
-      description: model.description,
       symmetries: { stationary: true, axisymmetric: true, sphericallySymmetric: false },
-      metricAt: (x) => model.metricAt(x),
-      christoffelAt: (x) => model.christoffelAt(x),
-      christoffelInto: (x, out) => model.christoffelInto(x, out),
-      domainCheck: (x) => model.domainCheck(x),
-    };
+    });
     const ray = generateNullRay(observer, unit([-1, 0.2, 0.1]));
     expect(() => reduceToOrbitalPlane(axisymmetricOnly, ray)).toThrow(
       /does not declare spherical symmetry/,

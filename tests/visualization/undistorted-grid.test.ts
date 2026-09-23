@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { geodesicDerivative } from '../../src/physics/geodesic/geodesic-system.js';
+import { HAMILTONIAN } from '../../src/physics/geodesic/formulation.js';
 import { RK4Integrator } from '../../src/physics/geodesic/integrators/rk4.js';
 import { STATE_DIM } from '../../src/physics/geodesic/state-vector.js';
 import {
@@ -48,14 +48,14 @@ const config: TraceConfig = {
 describe('backward ray tracing in flat space (ROADMAP.md 1.5)', () => {
   it('returns every ray along its original direction, with no deflection', () => {
     const screen = defaultScreen(33, 25, Math.PI / 2);
-    const derivative = geodesicDerivative(minkowski);
+    const session = HAMILTONIAN.bind(minkowski);
     let worstChord = 0;
 
     for (let j = 0; j < screen.heightPx; j += 1) {
       for (let i = 0; i < screen.widthPx; i += 1) {
         const direction = localRayDirection(screen, i, j);
         const initial = generateNullRay(observer, direction);
-        const ray = traceRay(config, initial, derivative);
+        const ray = traceRay(config, initial, session);
 
         expect(ray.outcome, `pixel (${i}, ${j}) did not reach the background`).toBe('background');
 
@@ -91,12 +91,12 @@ describe('backward ray tracing in flat space (ROADMAP.md 1.5)', () => {
 
   it('keeps every traced ray null all the way to the background', () => {
     const screen = defaultScreen(21, 17, Math.PI / 2);
-    const derivative = geodesicDerivative(minkowski);
+    const session = HAMILTONIAN.bind(minkowski);
 
     for (let j = 0; j < screen.heightPx; j += 1) {
       for (let i = 0; i < screen.widthPx; i += 1) {
         const initial = generateNullRay(observer, localRayDirection(screen, i, j));
-        const ray = traceRay(config, initial, derivative);
+        const ray = traceRay(config, initial, session);
         const check = checkTolerance(NULL_NORMALIZATION_POINTWISE, ray.nullResidual);
         expect(check.withinTolerance, `${check.message} at pixel (${i}, ${j})`).toBe(true);
       }
