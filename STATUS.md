@@ -12,7 +12,7 @@ every validation test listed under it is passing — not when the code merely ru
 render looks correct (`CLAUDE.md` §16: "A result is not considered validated merely
 because it 'looks right.'").
 
-**Last updated:** 2026-09-23 — engine rebuilt (Hamiltonian formulation, Dormand–Prince, exact event location); renderer bias removed; supersampling added.
+**Last updated:** 2026-09-23 — engine rebuilt; Einstein rings, strong deflection, timelike orbits and symplectic integration validated.
 
 ---
 
@@ -39,8 +39,8 @@ because it 'looks right.'").
 | M5A — 3+1 embedding & GWOSC strain (committed scope) | `not started` |
 | M5B — SXS / EHT (stretch, exploratory) | `not started` |
 
-Milestones 1 and 2A are closed: all of their validation tests pass in CI, 185 tests
-across 17 files. Everything below M2A remains unimplemented, and those rows read
+Milestones 1 and 2A are closed: all of their validation tests pass in CI, 218 tests
+across 19 files. Everything below M2A remains unimplemented, and those rows read
 `not run` because the corresponding physics code does not exist yet.
 
 **M2B is unblocked.** The roadmap is explicit that no shader work starts before the
@@ -164,6 +164,36 @@ via backward ray tracing. **Both met.**
 | Background direction independent of stopping radius | `pass` | `< 1e-10` from R = 100M to 5000M; uncorrected bias falls as `1/R^2` |
 | Shadow angular radius vs. `sin(psi) = b_c sqrt(f)/r` | `pass` | `< 1e-6` relative |
 | Orbital-plane reduction vs. full 3D integration | `pass` | exit directions agree to `< 1e-8`; ray stays in-plane to `< 1e-9` |
+
+**Extended validation** — items the roadmap or `CLAUDE.md` §16 name that the first pass
+through 2A did not actually deliver. Every reference below was computed independently in
+mpmath at 40–60 digits, sharing no code with the TypeScript under test.
+
+| Validation | Status | Measured |
+| --- | --- | --- |
+| Einstein ring, on-axis source, exact finite-distance lens equation (2A.3) | `pass` | observed angle to `< 1e-12` rad for rings n = 0–3 at three observer/source distances |
+| Relativistic ring spacing `(b_{n+1} - b_c)/(b_n - b_c)` → `e^{-2 pi}` | `pass` | `1e-6` vs. mpmath at n = 1→2; `1e-4` vs. `e^{-2 pi}` at n = 2→3 |
+| Primary ring vs. weak-field `theta_E = sqrt(4M D_LS/(D_OL D_OS))` | `pass` | ratio 1.107 → 1.033 → < 1.02 at 100M, 1000M, 10^4 M |
+| Strong-deflection limit, Bozza 2002: `alpha + ln(b/b_c - 1) -> b_bar = -0.40023` | `pass` | residual shrinks monotonically to `< 1e-5` at `b/b_c - 1 = 1e-6` |
+| Near-critical deflection accuracy | `pass` | bounded by a fixed effective impact-parameter error `< 2e-12`; see below |
+| Circular orbits: Kepler's law `dphi/dt = sqrt(M/r^3)`, exact in these coordinates | `pass` | `< 1e-11` at r = 7, 10, 20, 100 M |
+| ISCO at 6M, `E = sqrt(8/9)`, `L = 2 sqrt(3) M` | `pass` | closed form, and E, L minimal there along the circular family |
+| Radial epicyclic frequency `Omega sqrt(1 - 6M/r)` (stable side) | `pass` | `< 1e-6` at p = 8, 10, 20 M |
+| Instability growth rate `sqrt(M(6M - r))/r^2` (unstable side) | `pass` | `< 1e-3` at r = 5M |
+| Periapsis precession vs. exact elliptic-integral formula | `pass` | `2e-14`–`4e-13` relative, p from 10M to 1000M |
+| Precession → Einstein's `6 pi M/p` in the weak field | `pass` | ratio `< 1 + 1e-3` at p = 10^4 M |
+| Radial free fall: proper time and coordinate time | `pass` | `< 1e-11` and `< 1e-10` vs. closed forms |
+| Symplectic Gauss–Legendre vs. RK4 over 300 orbits (`CLAUDE.md` §7.2–7.3) | `pass` | mass-shell error flat at `1.0e-10` vs. RK4 growing linearly to `2.1e-8` |
+
+A result worth recording from this work: **near the critical curve the deflection is
+ill-conditioned, and the error follows a law rather than drifting.** With
+`alpha = -ln(b/b_c - 1) + ...`, `d alpha/db = -1/(b - b_c)`, so any integration error acts
+as a fixed effective impact-parameter error `delta b`, amplified by `1/(b - b_c)`. At
+tolerance `1e-12`, `|delta alpha| (b - b_c)` is `6.6e-13` at every `b/b_c - 1` from `1e-4`
+to `1e-10`, and the same `delta b` appears independently as the absolute error of every
+ring solution. The relative error in `alpha` therefore grows as the ray approaches `b_c`
+(to `5.6e-5` at `b/b_c - 1 = 1e-10`), and that is the problem's sensitivity, not a defect.
+The bound is placed on `delta b`, the quantity the integrator controls.
 
 **Definition of Done:** all of 2A.4 passes on the CPU reference. **Met.** This is the
 ground truth every later GPU or Kerr result is checked against.

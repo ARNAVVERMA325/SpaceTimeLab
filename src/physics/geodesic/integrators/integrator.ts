@@ -58,6 +58,13 @@ export interface Integrator {
 
   /** Local order of the continuous extension, when one is provided. */
   readonly denseOutputOrder?: number;
+
+  /**
+   * Whether the method is symplectic. CLAUDE.md §7.2: the property that matters for
+   * long-lived bound orbits, where it bounds energy-like errors instead of letting them
+   * drift. Explicit Runge-Kutta methods are not.
+   */
+  readonly symplectic?: boolean;
 }
 
 /**
