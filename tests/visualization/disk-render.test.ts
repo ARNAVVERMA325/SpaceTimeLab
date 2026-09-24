@@ -77,13 +77,36 @@ describe('rendered thin disk (ROADMAP.md 3.4)', () => {
   it('makes the approaching side brighter: Doppler beaming', () => {
     // Prograde rotation about +z, camera at phi = 0 looking in: the gas on the image's
     // right moves toward the camera. At 8830 K the visible band is near the Wien peak and
-    // the asymmetry is strong — measured about 3x in display-linear luminance.
+    // the asymmetry is strong — measured 4.3x in display-linear luminance over this band.
     const w = edgeOn.widthPx;
     const h = edgeOn.heightPx;
     const band = [Math.floor(h * 0.55), Math.floor(h * 0.68)] as const;
     const left = meanLuminance(edgeOn, 0, Math.floor(w * 0.4), band[0], band[1]);
     const right = meanLuminance(edgeOn, Math.ceil(w * 0.6), w, band[0], band[1]);
     expect(right / left).toBeGreaterThan(2);
+  });
+
+  it('beams far less strongly when the disk is hot: the visible band is then Rayleigh-Jeans', () => {
+    // Same geometry, same g, a hotter disk. In the visible band a blackbody at g T has
+    // I_nu = B_nu(g T), which for h nu << k T is 2 nu^2 k (g T) / c^2: linear in g rather
+    // than the steep, near-Wien dependence of an 8830 K disk. So the approaching/receding
+    // contrast is a property of where the band sits on the Planck curve, not of the
+    // kinematics, which are identical here.
+    const hot = renderDisk(80, 1e9, 0.1);
+    const w = hot.widthPx;
+    const h = hot.heightPx;
+    const band = [Math.floor(h * 0.55), Math.floor(h * 0.68)] as const;
+    const hotRatio =
+      meanLuminance(hot, Math.ceil(w * 0.6), w, band[0], band[1]) /
+      meanLuminance(hot, 0, Math.floor(w * 0.4), band[0], band[1]);
+    const coolRatio =
+      meanLuminance(edgeOn, Math.ceil(w * 0.6), w, band[0], band[1]) /
+      meanLuminance(edgeOn, 0, Math.floor(w * 0.4), band[0], band[1]);
+
+    expect(hot.diagnostics.frequencyRatioRange[1]).toBeCloseTo(edgeOn.diagnostics.frequencyRatioRange[1], 12);
+    expect(hotRatio).toBeGreaterThan(1.2);
+    expect(hotRatio).toBeLessThan(2);
+    expect(coolRatio / hotRatio).toBeGreaterThan(2);
   });
 
   it('shows the far side of the disk lensed over the top of the shadow', () => {

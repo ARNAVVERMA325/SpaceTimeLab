@@ -51,8 +51,14 @@ export function buildProvenanceReport(options: {
   readonly formulation?: GeodesicFormulation;
   /** Scene-specific entries, appended after the shared ones. */
   readonly sceneEntries?: readonly ProvenanceEntry[];
+  /** Whether rays can end on an emitting disk as well as on the background. */
+  readonly emitter?: 'none' | 'thin-disk';
+  /** How the render was executed; scheduling only, recorded so timings can be compared. */
+  readonly execution?: { readonly threads: number; readonly elapsedMs: number };
 }): ProvenanceReport {
   const { model, observer, integrator, diagnostics, backgroundRadius } = options;
+  const emitter = options.emitter ?? 'none';
+  const samples = diagnostics.samplesPerPixel;
   const coords = model.chart.coordinateNames.join(', ');
 
   const entries: ProvenanceEntry[] = [
@@ -112,28 +118,13 @@ export function buildProvenanceReport(options: {
     },
     {
       label: 'Rendering method',
-      value: 'Backward null-geodesic ray tracing, one ray per pixel',
+      value: `Backward null-geodesic ray tracing, ${samples} ray${samples === 1 ? '' : 's'} per pixel`,
       note:
-        'For each pixel the observer-frame viewing direction is converted into a null ' +
-        `wavevector k^mu and integrated until the ray reaches coordinate radius ` +
-        `${backgroundRadius}, where the background grid is sampled. The photon follows a ` +
-        'null geodesic of the chosen spacetime.',
-    },
-    {
-      label: 'Omitted physics',
-      value: 'Emission, absorption, plasma, radiative transfer, frequency shift',
-      note:
-        'There is no emitting matter and no relative motion between emitter and observer ' +
-        'in this scene, so there is nothing to shift. Redshift, Doppler boosting, ' +
-        'relativistic beaming and an accretion disk arrive with Milestone 3 rather than ' +
-        'being approximated now. Nothing here is a prediction of an observed image.',
-    },
-    {
-      label: 'Background',
-      value: 'A latitude/longitude grid on a sphere at fixed coordinate radius',
-      note:
-        'A visualization mapping, not a physical emitting surface. It carries no emission ' +
-        'model and no spectrum.',
+        'For each sample the observer-frame viewing direction is converted into a null ' +
+        'wavevector k^mu and integrated backward in time until the ray ' +
+        (emitter === 'thin-disk' ? 'crosses the disk, ' : '') +
+        `is captured, or reaches coordinate radius ${backgroundRadius}, where the ` +
+        'background is sampled. The photon follows a null geodesic of the chosen spacetime.',
     },
   ];
 
@@ -170,6 +161,32 @@ export function buildProvenanceReport(options: {
       label: 'Integration steps',
       value: diagnostics.totalSteps.toLocaleString('en-US'),
     },
+    ...diskValidation(diagnostics, emitter),
+    ...(diagnostics.pixelsWithFailures > 0
+      ? [
+          {
+            label: 'Failed pixels',
+            value: `${diagnostics.pixelsWithFailures} pixel(s) drawn in magenta`,
+            note:
+              'A pixel containing any numerically failed sample is painted in the failure ' +
+              'colour instead of being averaged into a plausible tint (CLAUDE.md §17).',
+          },
+        ]
+      : []),
+    ...(options.execution
+      ? [
+          {
+            label: 'Execution',
+            value:
+              `${(options.execution.elapsedMs / 1000).toFixed(1)} s on ` +
+              `${options.execution.threads} thread${options.execution.threads === 1 ? '' : 's'}`,
+            note:
+              'Rows are dealt to parallel workers, each tracing its rays independently. The ' +
+              'assembled image is bit-identical to a single-threaded render, which the test ' +
+              'suite checks; the thread count changes the time taken, never the result.',
+          },
+        ]
+      : []),
     ...ALL_TOLERANCES.map((t) => ({
       label: `Tolerance: ${t.id}`,
       value: `${t.kind} ${t.value.toExponential(0)} on ${t.quantity}`,
@@ -187,7 +204,53 @@ export function buildProvenanceReport(options: {
     validation,
     dataHierarchy:
       'Everything shown here is category B: a numerical approximation obtained by ' +
-      'integrating the geodesic equations of a category A exact analytical metric. No ' +
-      'observational data and no imported numerical-relativity data are used.',
+      'integrating the geodesic equations of a category A exact analytical metric' +
+      (emitter === 'thin-disk'
+        ? ', lit by an analytical emission model (Novikov-Thorne) whose physical scale uses ' +
+          'CODATA 2018 constants. The CIE 1931 colour-matching functions are a standard ' +
+          'colorimetric table, used only to turn a computed spectrum into display colour.'
+        : '.') +
+      ' No observational data and no imported numerical-relativity data are used.',
   };
+}
+
+function formatRange([low, high]: readonly [number, number], digits: number): string {
+  return `${low.toFixed(digits)} to ${high.toFixed(digits)}`;
+}
+
+/**
+ * What a disk render measured about its own light: the range of frequency shift and the
+ * range of observed temperature over every sample that landed on the disk.
+ */
+function diskValidation(diagnostics: RenderDiagnostics, emitter: 'none' | 'thin-disk'): ProvenanceEntry[] {
+  if (emitter !== 'thin-disk') return [];
+  if (diagnostics.raysHittingDisk === 0) {
+    return [{ label: 'Disk samples', value: 'No sample landed on the disk in this view' }];
+  }
+  const [tLow, tHigh] = diagnostics.observedTemperatureRange;
+  return [
+    {
+      label: 'Disk samples',
+      value: `${diagnostics.raysHittingDisk.toLocaleString('en-US')} rays ended on the disk`,
+    },
+    {
+      label: 'Frequency shift over the disk',
+      value: `g = nu_obs / nu_emit from ${formatRange(diagnostics.frequencyRatioRange, 3)}`,
+      note:
+        'Measured on this render, from the traced wavevector and the observer and emitter ' +
+        'four-velocities. g < 1 is a net redshift, g > 1 a net blueshift. The same code is ' +
+        'tested against the static-to-static redshift sqrt(f_emit / f_obs) (to 1e-12), the ' +
+        'closed form sqrt(1 - 3M/r) / sqrt(f_obs) for disk rays with no angular momentum about ' +
+        'the axis (1e-10), and an independent covariant evaluation on traced rays (1e-12).',
+    },
+    {
+      label: 'Observed temperature',
+      value:
+        `${Math.round(tLow).toLocaleString('en-US')} K to ` +
+        `${Math.round(tHigh).toLocaleString('en-US')} K`,
+      note:
+        'The colour temperature of the observed blackbody, g T(r), over every disk sample. ' +
+        'A blackbody at T seen with frequency ratio g is exactly a blackbody at g T.',
+    },
+  ];
 }

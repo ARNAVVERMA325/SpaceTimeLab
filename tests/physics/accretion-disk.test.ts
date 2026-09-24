@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Vec4 } from '../../src/physics/core/indices.js';
+import { contractLower } from '../../src/physics/core/metric-tensor.js';
 import { HAMILTONIAN } from '../../src/physics/geodesic/formulation.js';
 import { integrateGeodesic } from '../../src/physics/geodesic/integrate.js';
 import { Dopri5Integrator } from '../../src/physics/geodesic/integrators/dopri5.js';
@@ -12,6 +13,7 @@ import {
 import {
   freeFallingObserver,
   generateNullRay,
+  staticMinkowskiObserver,
   staticObserver,
 } from '../../src/physics/observer/observer.js';
 import { boostTetrad, orthonormalityResidual, Tetrad } from '../../src/physics/observer/tetrad.js';
@@ -19,6 +21,7 @@ import { gaussLegendreUnitInterval } from '../../src/physics/spacetimes/schwarzs
 import { criticalImpactParameter, schwarzschild } from '../../src/physics/spacetimes/schwarzschild.js';
 import { circularOrbit, equatorialTimelikeState } from '../../src/physics/spacetimes/schwarzschild-orbits.js';
 import { isCaptured } from '../../src/physics/spacetimes/schwarzschild-rays.js';
+import type { CartesianVec3 } from '../../src/physics/spacetimes/spacetime-model.js';
 import {
   diskOrbitEnergy,
   NOVIKOV_THORNE_ASYMPTOTIC_C,
@@ -169,6 +172,60 @@ describe('frequency shift (ROADMAP.md 3.3)', () => {
     expect(g).toBeLessThan(1); // climbing out: redshift
   });
 
+  it('has no shift at all in the flat-space limit, for any viewing direction', () => {
+    // The limit CLAUDE.md §16 asks for. Two statements, both exact rather than
+    // approximate: in Minkowski a static observer and a static emitter measure the same
+    // frequency whatever direction the photon travels, and so do two static observers at
+    // the same radius in Schwarzschild, where the gravitational potentials cancel.
+    const directions: CartesianVec3[] = [
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0, 0, 1],
+      [0.6, -0.8, 0],
+      [-0.48, 0.6, 0.64],
+    ];
+    const flat = staticMinkowskiObserver([0, 0, 0, 0]);
+    for (const n of directions) {
+      const ray = generateNullRay(flat, n);
+      const g = frequencyRatio(
+        { energy: ray.tangent[0], momentum: [ray.tangent[1], ray.tangent[2], ray.tangent[3]] },
+        STATIC_EMITTER,
+      );
+      expect(g, `flat, n = ${n.join(', ')}`).toBe(1);
+    }
+    for (const n of directions) {
+      const r = 9;
+      const curved = staticObserver(model, [0, r, Math.PI / 2, 0]);
+      const ray = generateNullRay(curved, n);
+      const f = model.lapseFunction(r);
+      const g = frequencyRatio(
+        {
+          energy: Math.sqrt(f) * ray.tangent[0],
+          momentum: model.geometry.toCartesianDirection(ray.position_x, ray.tangent),
+        },
+        STATIC_EMITTER,
+      );
+      expect(Math.abs(g - 1), `same radius, n = ${n.join(', ')}`).toBeLessThan(1e-15);
+    }
+  });
+
+  it('loses the orbital Doppler shift as M -> 0, like sqrt(M/r)', () => {
+    // A Keplerian emitter's speed relative to the static observer is sqrt(M/r) / sqrt(f),
+    // so the whole beaming asymmetry of the disk vanishes in the flat-space limit. Checked
+    // on the emitter itself, at fixed r, with M taken down four decades.
+    const r = 100;
+    const photon = { energy: -1, momentum: [0, 1, 0] as CartesianVec3 };
+    let previous = Number.POSITIVE_INFINITY;
+    for (const mass of [1e-2, 1e-3, 1e-4, 1e-5]) {
+      const g = frequencyRatio(photon, keplerianEmitter(mass, [r, 0, 0]));
+      const departure = Math.abs(g - 1);
+      expect(departure, `M = ${mass}`).toBeLessThan(1.01 * Math.sqrt(mass / r));
+      expect(departure).toBeLessThan(previous);
+      previous = departure;
+    }
+    expect(previous).toBeLessThan(1e-3);
+  });
+
   it('agrees with the covariant formula for rays hitting a Keplerian disk', () => {
     // Two independent routes to g. Covariant: k . u_emit = u^t (p_t + Omega p_phi), with p_t
     // and p_phi the conserved covariant momenta of the traced ray. Static-frame: boost the
@@ -283,6 +340,39 @@ describe('observers in motion (ROADMAP.md 3.1)', () => {
       // At infinity a static source has k . u = p_t, conserved exactly along the ray.
       const g = 1 / packed[4];
       expect(Math.abs(g - 1 / (1 + Math.sqrt((2 * M) / r))), `r = ${r}`).toBeLessThan(1e-14);
+    }
+  });
+
+  it('measures every photon Doppler-shifted from the static frame by exactly gamma (1 - beta . n)', () => {
+    // The general statement behind both the redshift and the aberration checks: at one
+    // event, two observers' measured frequencies differ by a pure local Lorentz factor.
+    // Computed here the long way round — contracting k with each four-velocity in
+    // coordinates, through the curved metric — and compared with the special-relativistic
+    // factor in the static observer's orthonormal frame, where the infaller moves at
+    // beta = -v r-hat. Agreement means the tetrads, the boost and the ray generator all
+    // share one frame convention; nothing in the code computes this factor.
+    const r = 12;
+    const position: Vec4 = [0, r, Math.PI / 2, 0];
+    const metric = model.metricAt(position);
+    const hover = staticObserver(model, position);
+    const faller = freeFallingObserver(model, position, M);
+    const v = Math.sqrt((2 * M) / r);
+    const gamma = 1 / Math.sqrt(1 - v * v);
+
+    for (const n of [
+      [1, 0, 0],
+      [-1, 0, 0],
+      [0, 1, 0],
+      [0.6, 0.8, 0],
+      [-0.48, 0.6, 0.64],
+    ] as const) {
+      const ray = generateNullRay(hover, n);
+      const k = ray.tangent;
+      const measuredRatio =
+        contractLower(metric, k, faller.tetrad.four_velocity_u()) /
+        contractLower(metric, k, hover.tetrad.four_velocity_u());
+      // beta points inward along the first spatial leg, so beta . n = -v n[0].
+      expect(Math.abs(measuredRatio - gamma * (1 - v * n[0])), `n = ${n.join(', ')}`).toBeLessThan(1e-14);
     }
   });
 

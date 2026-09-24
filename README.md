@@ -26,14 +26,20 @@ validated state, not work in progress.
 
 **Milestone 1 — Minkowski baseline & engine plumbing: gate passed.**
 **Milestone 2A — Exterior Schwarzschild, CPU reference: gate passed.**
+**Milestone 3 — Physical observers, frequency shift & thin accretion disk: gate passed.**
 
-Two spacetimes through one pipeline. Flat spacetime bends nothing, so the sky grid
-arrives exactly as a pinhole camera projects it. Schwarzschild bends light into a black
-hole shadow whose angular radius matches the closed-form prediction
-`sin(psi) = b_c sqrt(f) / r` to better than a part in a million.
+Three scenes through one pipeline. Flat spacetime bends nothing, so the sky grid arrives
+exactly as a pinhole camera projects it. Schwarzschild bends light into a black hole
+shadow whose angular radius matches the closed-form prediction
+`sin(psi) = b_c sqrt(f) / r` to better than a part in a million. A Novikov–Thorne thin
+disk adds an emitting surface: its colour and brightness come from the frequency shift
+`g = (k . u_obs) / (k . u_emit)` of the rays that reach it, and the camera can be a
+hovering observer or one falling freely from rest at infinity.
 
-Milestone 2B (the WebGPU port) is unblocked: the roadmap allows no shader work until the
-CPU reference is green, and it now is. See `STATUS.md`.
+M3 was taken ahead of M2B deliberately — porting the pipeline to shaders before it had
+observers in motion and an emission model would have meant porting it twice. Milestone 2B
+(the WebGPU port) remains unblocked and untouched: the roadmap allows no shader work
+until the CPU reference is green, and it now is, with more in it. See `STATUS.md`.
 
 ## Running it
 
@@ -45,8 +51,12 @@ npm test           # validation suite only
 npm run build      # typecheck + production build
 ```
 
-The validation suite includes a 10^6-step flat-space propagation gate, so a full run
-takes roughly ten seconds.
+The validation suite includes a 10^6-step flat-space propagation gate and several full
+image renders, so a full run takes roughly twelve seconds.
+
+Rendering runs in a pool of Web Workers, one per core. That is scheduling only: the image
+assembled from row blocks is bit-identical to a single-threaded render, which the suite
+checks byte for byte on every scene.
 
 ## Architecture
 
@@ -61,11 +71,14 @@ src/physics/
   spacetimes/           Spacetime models — the geometry, and nothing else,
                         plus their independent analytic reference results
   geodesic/             Integrators and the integration driver
-  observer/             Tetrad frames, observers, screens
+  observer/             Tetrad frames, observers, screens, frequency shift
+  radiation/            Physical constants, Planck spectrum, CIE 1931 colorimetry
   validation/           Normalization, conserved quantities, tolerances, health
-src/visualization/      Ray tracing, orbital-plane reduction, canvas output
+src/visualization/      Ray tracing, orbital-plane reduction, disk emission, display
+                        mapping, scene descriptions, canvas output
+src/workers/            Render workers for the parallel CPU path
 src/ui/                 Provenance and validation reporting
-src/data/               External scientific datasets (Milestone 5)
+src/data/               Generated colorimetric tables; external datasets (Milestone 5)
 ```
 
 Two conventions worth knowing before reading the code:
@@ -108,7 +121,23 @@ Milestone 2A — exterior Schwarzschild:
 | Orbital-plane reduction vs. full 3D | Exit directions agree to < 1e-8 |
 | Ricci-flatness and `K = 48M²/r⁶` | Confirmed symbolically during derivation |
 
-## Two notes on the renders
+Milestone 3 — observers, frequency shift and the thin disk:
+
+| Check | Result |
+| --- | --- |
+| Tetrad orthonormality, static / boosted / free-falling | < 1e-14 |
+| Redshift vs. `sqrt(f_emit / f_obs)` on a traced ray | < 1e-12 |
+| Static-frame shift vs. covariant `u^t (p_t + Omega p_phi)` | < 1e-12 relative |
+| Infaller vs. hoverer at one event vs. `gamma (1 - beta · n)` | < 1e-14 |
+| Aberration of the shadow edge under free fall | < 1e-8 relative |
+| Flat-space limit: no shift for a co-stationary emitter | Exactly 1 |
+| Novikov–Thorne flux vs. independent mpmath evaluation | < 1e-12 relative |
+| Disk energy balance `L_inf / Mdot = 1 - sqrt(8/9)` | < 1e-9 |
+| Disk temperature vs. independent CODATA 2018 calculation | < 1e-9 relative |
+| Blackbody chromaticity vs. `colour-science` at 1 nm | < 1e-4 in CIE (x, y) |
+| Parallel render vs. serial | Bit-identical, all scenes |
+
+## Three notes on the renders
 
 **In the flat scene, the grid lines curve.** That is rectilinear projection of a sphere,
 not light deflection: a pinhole camera maps great circles to straight lines, so meridians
@@ -116,6 +145,15 @@ appear straight while parallels do not. In flat spacetime the traced image is id
 pixel for pixel, to sampling the background along each pixel's initial viewing direction
 with no integration at all — which is what the validation suite asserts. Any deviation
 from that reference would be a defect, not lensing.
+
+**The disk's colour is a rendering of a computed spectrum, not a measurement.** What the
+engine produces is the frequency ratio `g` and the observed blackbody temperature `g T`
+at every disk hit; the picture is those numbers put through CIE 1931 colorimetry, an
+exposure choice and a tone curve, all disclosed in the panel. How much structure you see
+depends on where the visible band falls on the Planck curve: the bolometric boost is
+always `g^4`, but in-band luminance goes as `g` deep in the Rayleigh–Jeans tail, so a
+40,000 K disk looks nearly uniform while an 8,800 K one shows the approaching side 4.3x
+brighter. Same kinematics, different band — measured, not asserted.
 
 **In the black hole scene, the fine bands near the shadow edge are aliased.** Approaching
 the capture boundary, the lensing map compresses an unbounded sequence of images of the

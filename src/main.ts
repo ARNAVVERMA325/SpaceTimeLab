@@ -1,207 +1,40 @@
-import type { Vec4 } from './physics/core/indices.js';
-import type { Integrator } from './physics/geodesic/integrators/integrator.js';
-import { Dopri5Integrator } from './physics/geodesic/integrators/dopri5.js';
-import { STATE_DIM } from './physics/geodesic/state-vector.js';
-import {
-  defaultScreen,
-  inwardFacingScreen,
-  staticMinkowskiObserver,
-  staticObserver,
-  type Observer,
-  type PinholeScreen,
-} from './physics/observer/observer.js';
-import { minkowski } from './physics/spacetimes/minkowski.js';
-import {
-  criticalImpactParameter,
-  photonSphereRadius,
-  schwarzschild,
-} from './physics/spacetimes/schwarzschild.js';
-import { asymptoticDirection, isCaptured } from './physics/spacetimes/schwarzschild-rays.js';
-import type { SpacetimeModel } from './physics/spacetimes/spacetime-model.js';
 import { buildProvenanceReport, type ProvenanceEntry } from './ui/provenance.js';
-import { renderToCanvas } from './visualization/canvas-renderer.js';
-import { DEFAULT_CELESTIAL_GRID } from './visualization/celestial-grid.js';
-import type { TraceConfig } from './visualization/raytracer.js';
+import { RenderPool, renderSerially } from './visualization/parallel-renderer.js';
+import type { ImageAssembly } from './visualization/render-rows.js';
+import { buildScene, type ObserverChoice, type SceneDescription } from './visualization/scene.js';
 
 /**
  * Spacetime Lab application entry point.
  *
- * Two scenes share one pipeline: observer tetrad, ray generation, null-geodesic
- * integration, background intersection. Switching between them changes the metric and
- * nothing else, which is the point — flat spacetime bends nothing and the sky grid
- * arrives undistorted, while Schwarzschild bends light into a shadow and an Einstein
- * ring using the same code.
+ * Three scenes share one pipeline: observer tetrad, ray generation, null-geodesic
+ * integration, and an intersection test against whatever the scene contains. Changing
+ * scene changes the metric, the observer and the emission model, and nothing else —
+ * which is the point. Flat spacetime bends nothing and the sky grid arrives undistorted;
+ * Schwarzschild bends light into a shadow and an Einstein ring; the thin disk adds an
+ * emitting surface whose observed colour follows from the frequency shift of the traced
+ * rays rather than from any artistic choice.
  *
- * The interactive render is the CPU reference path. It is not fast, and CLAUDE.md §21
- * is explicit that 60 FPS is a rendering goal rather than a scientific-validity
- * requirement; the GPU port is its own milestone with its own cross-validation gate.
+ * Rendering happens in Web Workers, which is scheduling only: the image assembled from
+ * row blocks is bit-identical to a single-threaded render, and the test suite checks that
+ * on every scene kind. This is still the CPU reference path. CLAUDE.md §21 is explicit
+ * that 60 FPS is a rendering goal rather than a scientific-validity requirement; the GPU
+ * port is its own milestone with its own cross-validation gate.
  */
 
-interface Scene {
-  readonly id: string;
-  readonly label: string;
-  readonly model: SpacetimeModel;
-  readonly observer: Observer;
-  readonly screen: (widthPx: number, heightPx: number) => PinholeScreen;
-  readonly config: Omit<TraceConfig, 'observer'>;
-  readonly entries: readonly ProvenanceEntry[];
-  readonly caption: string;
-}
+type SceneKind = SceneDescription['kind'];
 
-/**
- * Integration tolerance for the interactive render.
- *
- * With the Hamiltonian formulation and Dormand-Prince, 1e-10 keeps the worst null
- * residual over a whole image at 5.1e-10 — inside the same 1e-9 gate the test suite
- * uses — so the picture on screen is held to the validated standard rather than a
- * looser preview one.
- */
-const RENDER_TOLERANCE = { absolute: 1e-10, relative: 1e-10 };
-
-const BLACK_HOLE_MASS = 1;
-const CAMERA_RADIUS = 20;
-
-function buildScenes(): readonly Scene[] {
-  const integrator: Integrator = new Dopri5Integrator(STATE_DIM, {
-    tolerance: RENDER_TOLERANCE,
-  });
-
-  const flatObserver = staticMinkowskiObserver([0, 0, 0, 0]);
-  const flatGrid = { ...DEFAULT_CELESTIAL_GRID, radius: 100 };
-
-  const holeModel = schwarzschild(BLACK_HOLE_MASS);
-  const holeObserver = staticObserver(holeModel, [0, CAMERA_RADIUS, Math.PI / 2, 0]);
-  const holeGrid = { ...DEFAULT_CELESTIAL_GRID, radius: 200 };
-
-  // The shadow's angular radius for a static observer at r: a photon arriving at angle
-  // psi from the inward radial direction has b = r sin(psi) / sqrt(f), so the capture
-  // boundary b = b_c sits at sin(psi) = b_c sqrt(f) / r.
-  const f = 1 - (2 * BLACK_HOLE_MASS) / CAMERA_RADIUS;
-  const shadowAngle = Math.asin(
-    (criticalImpactParameter(BLACK_HOLE_MASS) * Math.sqrt(f)) / CAMERA_RADIUS,
-  );
-
-  return [
-    {
-      id: 'schwarzschild',
-      label: 'Schwarzschild black hole',
-      model: holeModel,
-      observer: holeObserver,
-      screen: (w, h) => inwardFacingScreen(w, h, 3.2 * shadowAngle),
-      config: {
-        model: holeModel,
-        integrator,
-        grid: holeGrid,
-        limits: { initialStep: 1e-3, parameterMax: 20_000, maxSteps: 200_000, maxStep: 5 },
-        captureTest: (position_x: Vec4, tangent: Vec4) => isCaptured(holeModel, position_x, tangent),
-        orbitalPlaneReduction: true,
-        asymptoticDirection: (positionWorld, directionWorld) =>
-          asymptoticDirection(holeModel, positionWorld, directionWorld),
-      },
-      caption:
-        'Computed appearance of the background grid for the selected spacetime, observer ' +
-        'and rendering assumptions. The dark disc is the black-hole shadow: lines of ' +
-        'sight along which no background light reaches the observer.',
-      entries: [
-        {
-          label: 'Mass parameter',
-          value: `M = ${BLACK_HOLE_MASS} (geometric units)`,
-          note: `Horizon at r = ${2 * BLACK_HOLE_MASS}, photon sphere at r = ${photonSphereRadius(BLACK_HOLE_MASS)}.`,
-        },
-        {
-          label: 'Camera position',
-          value: `Static observer at r = ${CAMERA_RADIUS}M, theta = pi/2`,
-          note:
-            'Hovering at fixed radius, which requires proper acceleration. A freely-falling ' +
-            'observer at the same event would see a different image; that comparison is ' +
-            'Milestone 3.',
-        },
-        {
-          label: 'Shadow',
-          value: `Angular radius ${(shadowAngle * (180 / Math.PI)).toFixed(2)} degrees`,
-          note:
-            'Predicted in closed form by sin(psi) = b_c sqrt(f) / r with ' +
-            `b_c = 3 sqrt(3) M ~ ${criticalImpactParameter(BLACK_HOLE_MASS).toFixed(4)}M, and ` +
-            'matched by the traced image to better than a part in a million. The shadow is ' +
-            'larger than the horizon and is not a picture of it: it is the set of directions ' +
-            'whose backward-traced rays end on the hole.',
-        },
-        {
-          label: 'Ray termination',
-          value: 'Captured when r < 3M with k^r < 0',
-          note:
-            'Exact rather than a tuned cutoff. The null effective potential f/r^2 increases ' +
-            'inward of r = 3M, so a photon moving inward there can never turn around. Rays ' +
-            'are stopped while the chart is still well behaved rather than integrated toward ' +
-            'r = 2M, where these coordinates break down.',
-        },
-        {
-          label: 'Background direction',
-          value: 'Exact direction at infinity',
-          note:
-            'Rays are integrated to r = 200M, but a ray is still being bent there, so ' +
-            'reading the sky off its local direction would bias the image by the deflection ' +
-            'still to come (2.5e-4 rad for b = 10M). The remaining sweep to infinity is ' +
-            'added exactly from the orbit-equation tail integral, so the result does not ' +
-            'depend on the radius the integration stopped at.',
-        },
-        {
-          label: 'Sampling and aliasing',
-          value: 'Stratified supersampling, averaged in linear light',
-          note:
-            'Every sample is an independent, fully integrated geodesic; accumulation only ' +
-            'averages their colours, so no trajectory is altered (CLAUDE.md §9). The finest ' +
-            'bands hugging the shadow still alias at any sample count: approaching the ' +
-            'capture boundary the lensing map compresses an unbounded sequence of sky images ' +
-            'into a vanishing width, and each successive band is e^pi ~ 23 times thinner ' +
-            'than the last.',
-        },
-        {
-          label: 'Integration domain',
-          value: 'Exterior only, r > 2M',
-          note:
-            'Schwarzschild coordinates do not cover the horizon. That is a property of the ' +
-            'chart, not of the spacetime: the Kretschmann scalar K = 48 M^2 / r^6 is finite ' +
-            'at r = 2M. Continuing through the horizon needs horizon-penetrating coordinates ' +
-            'and is a later milestone.',
-        },
-      ],
-    },
-    {
-      id: 'minkowski',
-      label: 'Minkowski (flat) baseline',
-      model: minkowski,
-      observer: flatObserver,
-      screen: (w, h) => defaultScreen(w, h, Math.PI / 2),
-      config: {
-        model: minkowski,
-        integrator,
-        grid: flatGrid,
-        limits: { initialStep: 0.5, maxStep: 10, parameterMax: 1000, maxSteps: 10_000 },
-      },
-      caption:
-        'Flat spacetime: the pipeline bends nothing, so the sky grid arrives exactly as a ' +
-        'pinhole camera projects it. Curved grid lines here are rectilinear projection of a ' +
-        'sphere, not light deflection.',
-      entries: [
-        {
-          label: 'Image projection',
-          value: 'Rectilinear pinhole projection of the celestial sphere',
-          note:
-            'A rectilinear camera maps great circles to straight lines, so meridians appear ' +
-            'straight while parallels do not. In flat spacetime this image is identical, pixel ' +
-            'for pixel, to sampling the grid along each initial viewing direction with no ' +
-            'integration at all, which is what the validation suite asserts.',
-        },
-      ],
-    },
-  ];
-}
+const MAX_THREADS = 8;
 
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
   if (!found) throw new Error(`main: expected an element with id "${id}".`);
   return found as T;
+}
+
+function threadCount(): number {
+  if (typeof Worker === 'undefined') return 1;
+  const cores = typeof navigator === 'object' ? navigator.hardwareConcurrency : undefined;
+  return Math.max(1, Math.min(MAX_THREADS, cores ?? 4));
 }
 
 function renderEntries(container: HTMLElement, entries: readonly ProvenanceEntry[]): void {
@@ -238,69 +71,127 @@ async function main(): Promise<void> {
   const modelEntries = element<HTMLElement>('model-entries');
   const validationEntries = element<HTMLElement>('validation-entries');
   const hierarchy = element<HTMLElement>('data-hierarchy');
-  const sceneSelect = element<HTMLSelectElement>('scene');
-  const resolutionSelect = element<HTMLSelectElement>('resolution');
-  const samplesSelect = element<HTMLSelectElement>('samples');
   const renderButton = element<HTMLButtonElement>('render');
 
-  const scenes = buildScenes();
-  sceneSelect.replaceChildren(
-    ...scenes.map((scene) => new Option(scene.label, scene.id)),
-  );
+  const sceneSelect = element<HTMLSelectElement>('scene');
+  const widthSelect = element<HTMLSelectElement>('resolution');
+  const samplesSelect = element<HTMLSelectElement>('samples');
+  const observerSelect = element<HTMLSelectElement>('observer');
+  const inclinationInput = element<HTMLInputElement>('inclination');
+  const inclinationValue = element<HTMLElement>('inclination-value');
+  const massSelect = element<HTMLSelectElement>('mass');
+  const eddingtonSelect = element<HTMLSelectElement>('eddington');
+  const exposureInput = element<HTMLInputElement>('exposure');
+  const exposureValue = element<HTMLElement>('exposure-value');
+  const skyGridInput = element<HTMLInputElement>('sky-grid');
+
+  const threads = threadCount();
+  const pool = typeof Worker === 'undefined' ? undefined : new RenderPool(threads);
+
+  function describeScene(): SceneDescription {
+    const kind = sceneSelect.value as SceneKind;
+    const widthPx = Number.parseInt(widthSelect.value, 10);
+    const heightPx = Math.round((widthPx * 3) / 4);
+    const common = {
+      widthPx,
+      heightPx,
+      samplesPerAxis: Number.parseInt(samplesSelect.value, 10),
+      seed: 1,
+    };
+    const observer = observerSelect.value as ObserverChoice;
+
+    if (kind === 'minkowski') return { ...common, kind };
+    if (kind === 'schwarzschild-sky') {
+      return { ...common, kind, cameraRadius: 20, observer };
+    }
+    return {
+      ...common,
+      kind: 'schwarzschild-disk',
+      cameraRadius: 30,
+      inclinationDeg: Number.parseFloat(inclinationInput.value),
+      observer,
+      massSolar: Number.parseFloat(massSelect.value),
+      eddingtonFraction: Number.parseFloat(eddingtonSelect.value),
+      exposureStops: Number.parseFloat(exposureInput.value),
+      skyGrid: skyGridInput.checked,
+    };
+  }
+
+  /** Controls that only mean something for some scenes are hidden for the others. */
+  function syncControlVisibility(): void {
+    const kind = sceneSelect.value as SceneKind;
+    for (const field of document.querySelectorAll<HTMLElement>('[data-scenes]')) {
+      const scenes = (field.dataset.scenes ?? '').split(' ');
+      field.hidden = !scenes.includes(kind);
+    }
+    inclinationValue.textContent = `${Number.parseFloat(inclinationInput.value).toFixed(0)}°`;
+    const stops = Number.parseFloat(exposureInput.value);
+    exposureValue.textContent = `${stops > 0 ? '+' : ''}${stops.toFixed(1)}`;
+  }
 
   let controller: AbortController | undefined;
 
   async function run(): Promise<void> {
     controller?.abort();
+    pool?.cancel();
     const local = new AbortController();
     controller = local;
 
-    const scene = scenes.find((s) => s.id === sceneSelect.value) ?? scenes[0];
-    const width = Number.parseInt(resolutionSelect.value, 10);
-    const screen = scene.screen(width, Math.round((width * 3) / 4));
-    const samplesPerAxis = Number.parseInt(samplesSelect.value, 10);
-    const config: TraceConfig = {
-      ...scene.config,
-      observer: scene.observer,
-      sampling: { samplesPerAxis, seed: 1 },
-    };
+    const description = describeScene();
+    const scene = buildScene(description);
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('main: could not acquire a 2D rendering context.');
 
+    canvas.width = description.widthPx;
+    canvas.height = description.heightPx;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    const rays = description.widthPx * description.heightPx * description.samplesPerAxis ** 2;
     renderButton.disabled = true;
     status.dataset.health = '';
-    status.textContent = `Tracing ${screen.widthPx * screen.heightPx * samplesPerAxis * samplesPerAxis} null geodesics...`;
+    status.textContent = `Tracing ${rays.toLocaleString('en-US')} null geodesics on ${threads} thread${threads === 1 ? '' : 's'}...`;
     headline.textContent = scene.caption;
+
+    const drawRows = (assembly: ImageAssembly, rows: readonly number[]): void => {
+      const width = description.widthPx;
+      for (const row of rows) {
+        const line = assembly.pixels.subarray(row * width * 4, (row + 1) * width * 4);
+        context.putImageData(new ImageData(line, width, 1), 0, row);
+      }
+      status.textContent =
+        `Tracing null geodesics: ${assembly.rowsCompleted} / ${description.heightPx} rows ` +
+        `(${threads} thread${threads === 1 ? '' : 's'})`;
+    };
 
     const started = performance.now();
     try {
-      const result = await renderToCanvas(canvas, {
-        config,
-        screen,
-        rowsPerBand: 4,
-        signal: local.signal,
-        onProgress: (rows, total) => {
-          status.textContent = `Tracing null geodesics: ${rows} / ${total} rows`;
-        },
-      });
+      const options = { onRows: drawRows, signal: local.signal };
+      const result = pool
+        ? await pool.render(description, options)
+        : await renderSerially(description, options);
       const elapsedMs = performance.now() - started;
 
       const report = buildProvenanceReport({
         model: scene.model,
         observer: scene.observer,
         integrator: scene.config.integrator,
+        formulation: scene.config.formulation,
         diagnostics: result.diagnostics,
         backgroundRadius: scene.config.grid.radius,
         sceneEntries: scene.entries,
+        emitter: description.kind === 'schwarzschild-disk' ? 'thin-disk' : 'none',
+        execution: { threads: pool ? threads : 1, elapsedMs },
       });
 
       renderEntries(modelEntries, report.entries);
       renderEntries(validationEntries, report.validation);
       hierarchy.textContent = report.dataHierarchy;
 
-      const health = result.diagnostics.health;
+      const { health } = result.diagnostics;
       status.textContent =
-        `${result.diagnostics.raysTraced} rays, ` +
+        `${result.diagnostics.raysTraced.toLocaleString('en-US')} rays, ` +
         `${result.diagnostics.totalSteps.toLocaleString('en-US')} integration steps, ` +
-        `${(elapsedMs / 1000).toFixed(1)} s. ` +
+        `${(elapsedMs / 1000).toFixed(1)} s on ${pool ? threads : 1} thread${pool && threads > 1 ? 's' : ''}. ` +
         (health.level === 'ok'
           ? 'All checked invariants within validated tolerance.'
           : health.messages.join(' '));
@@ -313,11 +204,21 @@ async function main(): Promise<void> {
     }
   }
 
-  sceneSelect.addEventListener('change', () => void run());
-  resolutionSelect.addEventListener('change', () => void run());
-  samplesSelect.addEventListener('change', () => void run());
+  sceneSelect.addEventListener('change', () => {
+    syncControlVisibility();
+    void run();
+  });
+  for (const control of [widthSelect, samplesSelect, observerSelect, massSelect, eddingtonSelect]) {
+    control.addEventListener('change', () => void run());
+  }
+  skyGridInput.addEventListener('change', () => void run());
+  for (const slider of [inclinationInput, exposureInput]) {
+    slider.addEventListener('input', syncControlVisibility);
+    slider.addEventListener('change', () => void run());
+  }
   renderButton.addEventListener('click', () => void run());
 
+  syncControlVisibility();
   await run();
 }
 

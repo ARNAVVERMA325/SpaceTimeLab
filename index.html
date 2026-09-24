@@ -56,6 +56,19 @@
         letter-spacing: 0.06em;
         color: var(--muted);
       }
+      .controls .field {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .controls .field[hidden] { display: none; }
+      .controls .checkbox input { accent-color: var(--accent); }
+      .controls output {
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+        letter-spacing: 0;
+      }
+      .controls input[type="range"] { width: 110px; accent-color: var(--accent); }
       .controls select,
       .controls button {
         background: var(--panel);
@@ -129,30 +142,77 @@
       <h1>Spacetime Lab</h1>
       <p class="subtitle">
         Backward null-geodesic ray tracing through a chosen spacetime. One pipeline,
-        two metrics: flat spacetime bends nothing, Schwarzschild bends light into a
-        shadow and an Einstein ring. Every number on the right comes from the render
-        you are looking at.
+        three scenes: flat spacetime bends nothing, Schwarzschild bends light into a
+        shadow and an Einstein ring, and a Novikov&ndash;Thorne thin disk is coloured by
+        the frequency shift of the rays that reach it. Every number on the right comes
+        from the render you are looking at.
       </p>
     </header>
 
     <main>
       <figure>
         <div class="controls">
-          <label for="scene">Spacetime</label>
-          <select id="scene"></select>
-          <label for="resolution">Width</label>
-          <select id="resolution">
-            <option value="120">120 px</option>
-            <option value="200" selected>200 px</option>
-            <option value="320">320 px</option>
-            <option value="480">480 px (slow)</option>
-          </select>
-          <label for="samples">Samples</label>
-          <select id="samples">
-            <option value="1" selected>1 / px</option>
-            <option value="2">4 / px</option>
-            <option value="3">9 / px (slow)</option>
-          </select>
+          <span class="field">
+            <label for="scene">Scene</label>
+            <select id="scene">
+              <option value="schwarzschild-disk" selected>Schwarzschild + thin accretion disk</option>
+              <option value="schwarzschild-sky">Schwarzschild, background grid only</option>
+              <option value="minkowski">Minkowski (flat) baseline</option>
+            </select>
+          </span>
+          <span class="field">
+            <label for="resolution">Width</label>
+            <select id="resolution">
+              <option value="120">120 px</option>
+              <option value="200" selected>200 px</option>
+              <option value="320">320 px</option>
+              <option value="480">480 px (slow)</option>
+            </select>
+          </span>
+          <span class="field">
+            <label for="samples">Samples</label>
+            <select id="samples">
+              <option value="1" selected>1 / px</option>
+              <option value="2">4 / px</option>
+              <option value="3">9 / px (slow)</option>
+            </select>
+          </span>
+          <span class="field" data-scenes="schwarzschild-disk schwarzschild-sky">
+            <label for="observer">Camera</label>
+            <select id="observer">
+              <option value="static" selected>Static (hovering)</option>
+              <option value="free-fall">Free-falling from rest at infinity</option>
+            </select>
+          </span>
+          <span class="field" data-scenes="schwarzschild-disk">
+            <label for="inclination">Inclination <output id="inclination-value"></output></label>
+            <input id="inclination" type="range" min="2" max="89" step="1" value="80" />
+          </span>
+          <span class="field" data-scenes="schwarzschild-disk">
+            <label for="mass">Mass</label>
+            <select id="mass">
+              <option value="1e8">1e8 solar masses</option>
+              <option value="1e9">1e9 solar masses</option>
+              <option value="1e10">1e10 solar masses</option>
+              <option value="4e10" selected>4e10 solar masses</option>
+            </select>
+          </span>
+          <span class="field" data-scenes="schwarzschild-disk">
+            <label for="eddington">Accretion rate</label>
+            <select id="eddington">
+              <option value="0.01" selected>0.01 Eddington</option>
+              <option value="0.1">0.1 Eddington</option>
+              <option value="0.3">0.3 Eddington</option>
+            </select>
+          </span>
+          <span class="field" data-scenes="schwarzschild-disk">
+            <label for="exposure">Exposure <output id="exposure-value"></output></label>
+            <input id="exposure" type="range" min="-4" max="4" step="0.5" value="0" />
+          </span>
+          <span class="field checkbox" data-scenes="schwarzschild-disk">
+            <input id="sky-grid" type="checkbox" />
+            <label for="sky-grid">Sky grid</label>
+          </span>
           <button id="render" type="button">Re-render</button>
         </div>
         <canvas id="view" width="200" height="150"></canvas>
@@ -184,12 +244,15 @@
     </main>
 
     <footer>
-      The photon follows a null geodesic of the chosen spacetime. The grid is a
-      visualization mapping on a sphere at fixed coordinate radius, not a physical
-      emitting surface, and nothing here models emission, plasma or radiative transfer.
-      This is the CPU reference path: interactive frame rates are a separate milestone
-      with its own cross-validation gate. See <code>CLAUDE.md</code> for the project
-      rules and <code>STATUS.md</code> for validated milestone state.
+      The photon follows a null geodesic of the chosen spacetime. The background grid is
+      a visualization mapping on a sphere at fixed coordinate radius, not a physical
+      emitting surface. The accretion disk is an analytical Novikov&ndash;Thorne model
+      radiating as a local blackbody; it does not model plasma, scattering, returning
+      radiation or radiative transfer, and it is not a prediction of any observed image.
+      This is the CPU reference path, traced in parallel Web Workers: the assembled image
+      is bit-identical to a single-threaded render, and interactive frame rates are a
+      separate milestone with its own cross-validation gate. See <code>CLAUDE.md</code>
+      for the project rules and <code>STATUS.md</code> for validated milestone state.
     </footer>
 
     <script type="module" src="/src/main.ts"></script>

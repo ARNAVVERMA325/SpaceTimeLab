@@ -305,9 +305,24 @@ export function buildScene(description: SceneDescription): BuiltScene {
         label: 'Display mapping',
         value: `Exposure ${description.exposureStops >= 0 ? '+' : ''}${description.exposureStops} stops, Reinhard tone curve`,
         note:
-          'At 0 stops, the hottest ring seen at rest maps to display white. The tone curve ' +
-          "L' = L / (1 + L) compresses a range of radiance too wide for a screen while keeping " +
-          'hue. This changes how the picture looks, never what was computed.',
+          'At 0 stops the hottest ring, seen at rest, has display luminance 1, which the tone ' +
+          "curve L' = L / (1 + L) puts at 0.5. The curve compresses a range of radiance far too " +
+          'wide for a screen while keeping chromaticity, so a blueshifted ring stays blue as it ' +
+          'saturates. This changes how the picture looks, never what was computed: the linear ' +
+          'radiance behind every pixel is kept unmodified.',
+      },
+      {
+        label: 'Why the contrast depends on temperature',
+        value: 'The visible band sits in a different part of the Planck curve for each disk',
+        note:
+          'The observed spectrum is a blackbody at g T, so the bolometric boost is exactly g^4 ' +
+          'whatever the temperature. A colour image shows in-band luminance instead, and that ' +
+          'depends on where the visible band falls on the Planck curve. Below about 10,000 K the ' +
+          'band sits near the peak and the boost is steeper than g^4; far above it the band lies ' +
+          'in the Rayleigh-Jeans tail, where B_nu is proportional to T and the boost falls to g. ' +
+          'Measured on this renderer at 80 degrees, the approaching side outshines the receding ' +
+          'one by 4.3x at 8,830 K but only 1.8x at 39,500 K, with identical kinematics. A hot ' +
+          'disk looks almost uniformly blue-white however fast its gas moves.',
       },
       {
         label: 'Omitted physics',

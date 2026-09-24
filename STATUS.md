@@ -12,7 +12,7 @@ every validation test listed under it is passing — not when the code merely ru
 render looks correct (`CLAUDE.md` §16: "A result is not considered validated merely
 because it 'looks right.'").
 
-**Last updated:** 2026-09-23 — engine rebuilt; Einstein rings, strong deflection, timelike orbits and symplectic integration validated.
+**Last updated:** 2026-09-24 — M3 closed: observers in motion, frequency shift, Novikov-Thorne thin disk, colorimetry, and parallel CPU rendering.
 
 ---
 
@@ -33,15 +33,21 @@ because it 'looks right.'").
 | M1 — Minkowski baseline & engine plumbing | **`gate passed`** |
 | M2A — Exterior Schwarzschild, CPU reference | **`gate passed`** |
 | M2B — WebGPU/WGSL parallelization | `not started` |
-| M3 — Physical observer, tetrad frames & accretion disk | `not started` |
+| M3 — Physical observer, tetrad frames & accretion disk | **`gate passed`** |
 | M4A — Kerr, Boyer–Lindquist exterior | `not started` |
 | M4B — Kerr–Schild horizon-penetrating integration | `not started` |
 | M5A — 3+1 embedding & GWOSC strain (committed scope) | `not started` |
 | M5B — SXS / EHT (stretch, exploratory) | `not started` |
 
-Milestones 1 and 2A are closed: all of their validation tests pass in CI, 218 tests
-across 19 files. Everything below M2A remains unimplemented, and those rows read
+Milestones 1, 2A and 3 are closed: all of their validation tests pass in CI, 261 tests
+across 23 files. Everything below M3 remains unimplemented, and those rows read
 `not run` because the corresponding physics code does not exist yet.
+
+M3 was taken out of order, ahead of M2B. The roadmap sequences 2B before 3, but 2B is a
+WebGPU port whose only purpose is speed, and porting a pipeline that did not yet have
+observers in motion, frequency shift or an emission model would have meant porting it
+twice. M2B's prerequisite is unchanged and still met: the CPU reference is the ground
+truth it will be checked against, and it is now a larger reference.
 
 **M2B is unblocked.** The roadmap is explicit that no shader work starts before the
 2A gate closes, and it has: the CPU reference is the ground truth every GPU result will
@@ -268,8 +274,10 @@ and is now a measurement of the Lyapunov exponent.
   approaches a double root, rather than returning a quietly inaccurate value. It also
   loses *relative* accuracy in the far weak field, where `alpha = 4*Integral - pi`
   cancels almost completely; absolute accuracy stays near `1e-15`.
-- The static-observer tetrad is real but is only the shell observer. Freely-falling
-  observers, frequency shift, beaming and the accretion disk remain M3.
+- Throughput above is single-threaded. The parallel CPU path landed with M3 and gives
+  roughly the core count; it is still not M2B.
+- The static-observer tetrad at the close of 2A was only the shell observer. Freely-falling
+  observers, frequency shift, beaming and the accretion disk landed with M3.
 
 ---
 
@@ -298,21 +306,96 @@ GPU results matching the CPU reference within a documented, justified tolerance.
 
 ## M3 — Physical observer, tetrad frames & accretion disk
 
-**State:** `not started` — unblocked; M2A's gate is closed.
-**Note:** 3.1's static-observer tetrad landed early with M2A, because 2A.3's camera had
-to be a physical observer rather than a labelled fake. It is validated against
-`g_mu_nu e^mu_(a) e^nu_(b) = eta_ab` in curved spacetime. Freely-falling observers,
-relativistic ray generation, frequency shift, beaming and the disk are all still open.
+**State:** `gate passed` — 2026-09-24.
 
-| Validation test | Status |
-| --- | --- |
-| Tetrad orthonormality `g_mu_nu e^mu_(a) e^nu_(b) = eta_ab` | `not run` |
-| Static-observer normalization `u^mu = (1/sqrt(-g_00), 0, 0, 0)` | `not run` |
-| Redshift factor against analytical static-observer relation | `not run` |
-| Flat-space limit: no beaming / no Doppler shift for a static observer | `not run` |
+Every reference value below is either a closed form or an independent second route through
+the code; nothing is checked against a stored output of the same function.
+
+| Validation test | Status | Measured |
+| --- | --- | --- |
+| Tetrad orthonormality `g_mu_nu e^mu_(a) e^nu_(b) = eta_ab` (static, boosted, free-fall) | `pass` | `< 1e-14` at r = 3.5M to 1000M |
+| Static-observer normalization `u^mu = (1/sqrt(f), 0, 0, 0)` | `pass` | to 14 digits; spatial components exactly `0` |
+| Free-faller's `u^mu = (1/f, -sqrt(2M/r), 0, 0)`, and it is a geodesic | `pass` | agrees with the `E = 1` timelike geodesic to `1e-13` |
+| Redshift factor vs. the analytical static-observer relation `sqrt(f_emit/f_obs)` | `pass` | `< 1e-12` on a traced radial ray, r = 8M to 20M |
+| Frequency shift: static-frame route vs. covariant `u^t (p_t + Omega p_phi)` | `pass` | `< 1e-12` relative, on rays traced in the full world chart |
+| Frequency shift on meridional rays vs. `sqrt(1 - 3M/r) / sqrt(f_obs)` | `pass` | `< 1e-10` |
+| Infaller vs. hoverer at one event: local Lorentz factor `gamma (1 - beta . n)` | `pass` | `< 1e-14` for five directions |
+| Infaller's view of the sky behind: `1 / (1 + sqrt(2M/r))` | `pass` | `< 1e-14` at r = 5M, 20M, 100M |
+| Aberration of the shadow edge: `cos psi' = (cos psi + v)/(1 + v cos psi)` | `pass` | `< 1e-8` relative, by bisection on capture in the infaller's frame |
+| Flat-space limit: no shift for co-stationary observer and emitter, any direction | `pass` | exactly `1` in Minkowski; `< 1e-15` at equal radius in Schwarzschild |
+| Flat-space limit: orbital Doppler shift vanishes as `sqrt(M/r)` | `pass` | monotone, `< 1e-3` at M/r = 1e-7 |
+| Novikov–Thorne flux vs. an independent mpmath evaluation of the closed form | `pass` | `< 1e-12` relative, r = 6M to 1000M |
+| Disk energy balance: `L_inf / Mdot = 1 - sqrt(8/9)` | `pass` | `< 1e-9`; efficiency `0.0571909584179366` |
+| Flux peak radius `r = 9.550928 M`, zero torque at the ISCO | `pass` | `< 2e-6`; `F(6M) = 0`, `F >= 0` everywhere |
+| Far-field flux `-> (3 M Mdot / 8 pi r^3)(1 - C sqrt(M/r))`, `C = sqrt6 + sqrt3 ln(1 + sqrt2)` | `pass` | monotone convergence to `< 1e-3` |
+| Disk temperature in physical units vs. an independent CODATA 2018 calculation | `pass` | `< 1e-9` relative; scales as `(f_Edd / M)^(1/4)` to 12 digits |
+| Planck spectrum vs. the Stefan–Boltzmann and Wien laws (neither used in the code) | `pass` | `< 1e-9` and `< 1e-6` |
+| Blackbody chromaticity vs. `colour-science`'s independent 1 nm integration | `pass` | `< 1e-4` in CIE 1931 (x, y) |
+| Fast colour table vs. direct 5 nm integration | `pass` | `< 5e-6` relative on X, Y, Z over 1000–60,000 K |
+| Rendered disk: both redshift and blueshift at 80 degrees | `pass` | `g` from `0.49` to `1.44` |
+| Rendered disk: approaching side brighter (Doppler beaming) | `pass` | `4.3x` in display-linear luminance at 8,830 K |
+| Rendered disk: the same beaming is weak for a hot disk (Rayleigh–Jeans band) | `pass` | `1.8x` at 39,500 K, identical kinematics |
+| Rendered disk: far side lensed over the shadow (Luminet 1979) | `pass` | lit pixels above the shadow centre |
+| Rendered disk: face-on view symmetric and wholly redshifted | `pass` | `g_max < 1`; left/right within `10%` |
+| Parallel render bit-identical to serial | `pass` | every byte and every linear-radiance value, all four scene kinds |
+| Null normalization over a whole disk image | `pass` | `<= 6.0e-10` against the `1e-9` gate |
 
 **Definition of Done:** toggling static vs. free-falling observer visibly and correctly
 changes beaming/Doppler shift; disk shows the classical asymmetric intensity pattern.
+**Met**, and both halves are checked numerically rather than by eye: the aberration and
+Doppler rows above are the "correctly", and the app exposes the toggle.
+
+**What landed:**
+
+- **Observers in motion.** `boostTetrad` Lorentz-boosts an orthonormal frame in place;
+  the freely-falling observer is the static frame boosted by `-sqrt(2M/r) r-hat`. Both
+  the aberration of the shadow and the shift of the sky are consequences, not special
+  cases in the renderer.
+- **Frequency shift** `g = (k . u_obs) / (k . u_emit)`, computed once and carrying
+  gravitational redshift, transverse Doppler and line-of-sight Doppler together. Rays are
+  launched with `k . u_obs = 1` by construction, so `g = 1 / (k . u_emit)`, evaluated in
+  the static orthonormal frame at the emission event — which keeps it chart-independent
+  and indifferent to the orbital-plane reduction.
+- **Novikov–Thorne / Page–Thorne thin disk** in closed form between the ISCO and 20M,
+  with the physical temperature scale set by the black-hole mass and an Eddington
+  fraction, from CODATA 2018 and IAU 2015 values.
+- **Colorimetry rather than a colour ramp.** The observed spectrum of a blackbody at `T`
+  seen with ratio `g` is a blackbody at `g T`; that spectrum is integrated against the
+  CIE 1931 2-degree colour-matching functions and converted to sRGB per IEC 61966-2-1.
+  The CMF table is generated from `colour-science` by `scripts/generate_cie_cmf.py` and
+  carries its provenance in the file.
+- **A disclosed display mapping.** Exposure is relative to the luminance of the hottest
+  ring seen at rest; the Reinhard curve is applied at encode only. The linear radiance
+  behind every pixel is kept unmodified, so the tone curve cannot leak into a measurement.
+- **Parallel CPU rendering.** Rows are dealt round-robin to a pool of Web Workers, which
+  rebuild the scene from a plain-data `SceneDescription` — the same function the main
+  thread uses. Interleaved rather than banded, because rays near the shadow edge cost many
+  times more than rays that miss the hole.
+
+**Measured performance** (4 cores in this container, 200x150 at 1 sample/px, tolerance
+`1e-10`): disk scene 4.1 s, Schwarzschild sky 3.6 s, Minkowski 1.1 s — about 7.3k rays/s
+against 3.5k single-threaded. A 320x240 disk render at 4 samples/px takes 30 s.
+
+**Known limitations, deliberately not papered over:**
+
+- The disk is a **Novikov–Thorne model, not an accretion simulation**: no disk
+  atmosphere, no electron scattering or spectral hardening, no limb darkening, no
+  self-irradiation or returning radiation, no emission inside the ISCO, no plasma and no
+  radiative transfer. It does not affect the spacetime. Thin disks are a reasonable model
+  only at moderate accretion rates. The UI says all of this.
+- **Colour is not a measurement.** The sRGB values are a colorimetric rendering of a
+  computed spectrum, subject to gamut clamping, an exposure choice and a tone curve.
+  The frequency ratio and the observed temperature are the physical outputs; the picture
+  is a display of them.
+- The background grid still has **no spectrum**, so it is drawn unshifted. A ray that
+  ends on the sky carries no radiometry — only disk light does.
+- What a colour image shows depends on where the visible band sits on the Planck curve:
+  the bolometric boost is always `g^4`, but in-band luminance goes as `g` deep in the
+  Rayleigh–Jeans tail. A 40,000 K disk therefore looks almost uniform however fast its
+  gas moves. This is measured (the two beaming rows above), and stated in the UI, because
+  it is the kind of thing that otherwise looks like a rendering bug.
+- Workers give the CPU path roughly the core count. **This is not M2B**: WebGPU is
+  untouched, and 60 FPS remains out of reach on this path.
 
 ---
 
@@ -407,6 +490,8 @@ Carried here so a session picking up mid-project can see them in one place.
 | 5 | Carter constant convention (not a tolerance, but must be fixed before M4A) | M4A | open |
 | 6 | Kerr–Schild vs. Boyer–Lindquist exterior agreement tolerance | M4B | open |
 | 7 | Preview vs. reference null-residual tolerance | M2A | **closed** — preview tolerance retired; render meets the `1e-9` reference gate at `5.1e-10` |
+| 8 | Fast blackbody-colour table vs. direct spectral integration | M3 | **closed** — `5e-6` relative on X, Y, Z, from a measured worst case below `3e-6`; quadratic log-log interpolation at 256 nodes per decade |
+| 9 | Disk energy-balance check (quadrature over an infinite domain) | M3 | **closed** — `1e-9` relative, after substituting `r = 1000/w^2` to remove the `sqrt(u)` tail behaviour |
 
 `CLAUDE.md` §17: there is no universal numerical-error threshold. Each entry above must
 be justified by the relevant numerical method and quantity when it is closed.
