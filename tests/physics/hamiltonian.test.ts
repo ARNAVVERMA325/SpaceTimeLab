@@ -6,6 +6,7 @@ import { integrateGeodesic } from '../../src/physics/geodesic/integrate.js';
 import { Dopri5Integrator } from '../../src/physics/geodesic/integrators/dopri5.js';
 import { STATE_DIM } from '../../src/physics/geodesic/state-vector.js';
 import { inverseResidual } from '../../src/physics/geometry/invert-metric.js';
+import { kerr } from '../../src/physics/spacetimes/kerr.js';
 import { minkowski } from '../../src/physics/spacetimes/minkowski.js';
 import { schwarzschild } from '../../src/physics/spacetimes/schwarzschild.js';
 import {
@@ -28,7 +29,8 @@ import { normalizationResidual } from '../../src/physics/validation/normalizatio
  */
 
 const schw = schwarzschild(1);
-const MODELS: readonly SpacetimeModel[] = [minkowski, schw];
+const spinning = kerr(1, 0.9);
+const MODELS: readonly SpacetimeModel[] = [minkowski, schw, spinning];
 
 const EVENTS: Readonly<Record<string, readonly Vec4[]>> = {
   minkowski: [
@@ -40,6 +42,12 @@ const EVENTS: Readonly<Record<string, readonly Vec4[]>> = {
     [0, 7.5, Math.PI / 3, 1],
     [5, 40, 0.4, 2],
     [0, 2.2, 2.5, 0],
+  ],
+  kerr: [
+    [0, 2.5, Math.PI / 2, 0],
+    [0, 4.1, Math.PI / 3, 1],
+    [5, 30, 0.4, 2],
+    [0, 1.5, 2.5, 0],
   ],
 };
 
