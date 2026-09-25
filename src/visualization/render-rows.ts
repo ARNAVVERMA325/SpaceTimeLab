@@ -85,7 +85,9 @@ export class ImageAssembly {
         widthPx * heightPx,
         samplesPerAxis,
         NULL_NORMALIZATION_TRACED,
-        this.description.kind !== 'minkowski',
+        // Only the Schwarzschild scenes carry the exact asymptotic correction; Kerr has no
+        // closed-form tail integral, and flat spacetime needs none.
+        this.description.kind === 'schwarzschild-sky' || this.description.kind === 'schwarzschild-disk',
       ),
     };
   }

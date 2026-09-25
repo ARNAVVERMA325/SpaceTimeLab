@@ -11,6 +11,10 @@ import {
   type Observer,
   type PinholeScreen,
 } from '../physics/observer/observer.js';
+import { kerr, equatorialPhotonOrbitRadius, outerHorizonRadius } from '../physics/spacetimes/kerr.js';
+import { isCaptured as kerrIsCaptured } from '../physics/spacetimes/kerr-rays.js';
+import { shadowExtent } from '../physics/spacetimes/kerr-shadow.js';
+import { zamoObserver } from '../physics/observer/zamo.js';
 import { minkowski } from '../physics/spacetimes/minkowski.js';
 import { NOVIKOV_THORNE_EFFICIENCY, thinDiskScale } from '../physics/spacetimes/novikov-thorne.js';
 import { criticalImpactParameter, photonSphereRadius, schwarzschild } from '../physics/spacetimes/schwarzschild.js';
@@ -48,6 +52,13 @@ export type SceneDescription =
       readonly observer: ObserverChoice;
     })
   | (SceneCommon & {
+      readonly kind: 'kerr-sky';
+      readonly cameraRadius: number;
+      readonly inclinationDeg: number;
+      /** Spin parameter a in units of M, |a| <= 1. Positive spins toward +phi. */
+      readonly spin: number;
+    })
+  | (SceneCommon & {
       readonly kind: 'schwarzschild-disk';
       readonly cameraRadius: number;
       readonly inclinationDeg: number;
@@ -77,9 +88,26 @@ export const RENDER_TOLERANCE = 1e-10;
 
 const MASS = 1;
 
-function integrator(): Dopri5Integrator {
+/**
+ * The tolerance Kerr scenes integrate at.
+ *
+ * A hundred times tighter than the Schwarzschild render, because a Kerr ray costs more
+ * error: there is no orbital-plane reduction, so it moves in the full four-dimensional
+ * chart, and it is followed out to 400M rather than 200M. The worst null residual over an
+ * image scales linearly with the tolerance, and it is the worst ray in the image that has
+ * to pass, so a bigger image needs a tighter tolerance to hold the same bound. Measured on
+ * a 200 x 150 image: 1.30e-9 at 1e-11, 1.35e-10 at 1e-12.
+ *
+ * Only 1e-12 keeps the whole image inside the `null-normalization-traced` gate of 1e-9
+ * that the rest of the project is held to, at about 1.5x the steps. Loosening the gate for
+ * the harder spacetime would be the wrong way round; the render is slower instead, which
+ * CLAUDE.md §21 explicitly permits.
+ */
+export const KERR_RENDER_TOLERANCE = 1e-12;
+
+function integrator(tolerance = RENDER_TOLERANCE): Dopri5Integrator {
   return new Dopri5Integrator(STATE_DIM, {
-    tolerance: { absolute: RENDER_TOLERANCE, relative: RENDER_TOLERANCE },
+    tolerance: { absolute: tolerance, relative: tolerance },
   });
 }
 
@@ -145,6 +173,8 @@ export function buildScene(description: SceneDescription): BuiltScene {
       ],
     };
   }
+
+  if (description.kind === 'kerr-sky') return buildKerrScene(description);
 
   const model = schwarzschild(MASS);
   const common = {
@@ -339,6 +369,139 @@ export function buildScene(description: SceneDescription): BuiltScene {
         note: description.skyGrid
           ? 'A visualization texture with no spectrum, drawn unshifted. It is not physical starlight.'
           : 'No background sources are modelled.',
+      },
+    ],
+  };
+}
+
+/**
+ * Kerr: the same pipeline with the spin turned on.
+ *
+ * Three things have to change, and nothing else does. The orbital-plane reduction is off,
+ * because Kerr is axisymmetric but not spherically symmetric and its geodesics do not lie
+ * in planes through the centre — the reduction refuses the model outright rather than
+ * quietly producing wrong rays. The camera is a zero-angular-momentum observer, because
+ * the g_t_phi cross term admits no diagonal static tetrad and no static observer exists
+ * inside the ergosphere. And capture is decided from the radial potential's roots rather
+ * than from a radius.
+ *
+ * The background is sampled at r = 400M with no asymptotic correction: the tail integral
+ * that supplies it for Schwarzschild has no closed form here. The residual bias is
+ * measured in the test suite rather than assumed, and is well under a pixel at these
+ * fields of view.
+ */
+const KERR_BACKGROUND_RADIUS = 400;
+
+function buildKerrScene(
+  description: Extract<SceneDescription, { kind: 'kerr-sky' }>,
+): BuiltScene {
+  const { widthPx, heightPx, samplesPerAxis, seed, spin } = description;
+  const model = kerr(MASS, spin);
+  const inclination = (Math.max(1, Math.min(90, description.inclinationDeg)) * Math.PI) / 180;
+  const position: Vec4 = [0, description.cameraRadius, inclination, 0];
+  const observer = zamoObserver(model, position);
+
+  // Frame the shadow: its analytic extent in impact parameter, converted to an angle at
+  // the camera's radius, with room around it.
+  const extent = Math.abs(spin) < 1e-6
+    ? { width: 2 * criticalImpactParameter(MASS), height: 2 * criticalImpactParameter(MASS), alphaCentre: 0 }
+    : shadowExtent(MASS, spin, inclination, 4096);
+  const span = Math.max(extent.width, extent.height);
+  const fov = 2 * Math.atan((1.6 * span) / (2 * description.cameraRadius));
+
+  return {
+    description,
+    model,
+    observer,
+    screen: inwardFacingScreen(widthPx, heightPx, fov),
+    config: {
+      model,
+      integrator: integrator(KERR_RENDER_TOLERANCE),
+      formulation: HAMILTONIAN,
+      observer,
+      grid: { ...DEFAULT_CELESTIAL_GRID, radius: KERR_BACKGROUND_RADIUS },
+      limits: { initialStep: 1e-3, parameterMax: 40_000, maxSteps: 300_000, maxStep: 10 },
+      captureTest: (x: Vec4, k: Vec4) => kerrIsCaptured(model, x, k),
+      sampling: { samplesPerAxis, seed },
+    },
+    caption:
+      'Computed appearance of the background grid for a rotating black hole, from a ' +
+      'zero-angular-momentum observer. The shadow is displaced and flattened on one side: ' +
+      'that asymmetry is the spin, and it is not drawn but traced.',
+    entries: [
+      {
+        label: 'Spacetime parameters',
+        value: `M = ${MASS}, a = ${spin} (a/M = ${spin})`,
+        note:
+          `Outer horizon at r_+ = ${outerHorizonRadius(MASS, spin).toFixed(4)}M. Equatorial ` +
+          `photon orbits at ${equatorialPhotonOrbitRadius(MASS, Math.abs(spin), 'prograde').toFixed(4)}M ` +
+          `prograde and ${equatorialPhotonOrbitRadius(MASS, Math.abs(spin), 'retrograde').toFixed(4)}M ` +
+          'retrograde: the spin drags the prograde orbit inward and pushes the retrograde one out, ' +
+          'which is where the asymmetry comes from.',
+      },
+      {
+        label: 'Camera',
+        value: `Zero-angular-momentum observer at r = ${description.cameraRadius}M, ` +
+          `${((inclination * 180) / Math.PI).toFixed(0)} degrees from the spin axis`,
+        note:
+          'The locally non-rotating frame (Bardeen, Press & Teukolsky 1972). It is dragged ' +
+          'around the hole by the rotation of the spacetime, accelerates, and is not a freely ' +
+          'falling frame. A static observer would do outside the ergosphere but not inside it, ' +
+          'and the Boyer-Lindquist chart has no diagonal static tetrad in any case.',
+      },
+      {
+        label: 'Predicted shadow',
+        value:
+          `${extent.width.toFixed(3)}M wide by ${extent.height.toFixed(3)}M tall in impact ` +
+          `parameter, centred ${extent.alphaCentre.toFixed(3)}M off the line of sight`,
+        note:
+          'From the analytic critical curve of Bardeen (1973), the image of the spherical ' +
+          'photon orbits. Seen edge-on the height is exactly 2 x 3 sqrt(3) M at any spin while ' +
+          'the width shrinks, so the shadow is displaced and flattened rather than simply ' +
+          'smaller. Rays are traced without reference to this curve; the test suite compares ' +
+          'the two.',
+      },
+      {
+        label: 'Ray termination',
+        value: 'Captured when the radial potential R(r) has no root between here and r_+',
+        note:
+          'Exact rather than a chosen radius: a turning point is a root of R, so a photon ' +
+          'moving inward with none below it must reach the horizon. Stopping there also keeps ' +
+          'the integration away from r_+, where dphi/dlambda diverges in these coordinates ' +
+          'while r barely moves.',
+      },
+      {
+        label: 'Background direction',
+        value: `Local direction at r = ${KERR_BACKGROUND_RADIUS}M, with no tail correction`,
+        note:
+          'Schwarzschild\u2019s exact asymptotic correction comes from a tail integral of the ' +
+          'orbit equation, which has no closed-form counterpart here. The remaining bias is ' +
+          'measured by comparing against integration to 4000M rather than assumed: it is well ' +
+          'under one pixel at this field of view.',
+      },
+      {
+        label: 'Sampling',
+        value: `${samplesPerAxis * samplesPerAxis} stratified sample(s) per pixel, averaged in linear light`,
+        note:
+          'Every sample is an independent, fully integrated geodesic. The photon-ring structure ' +
+          'at the shadow edge is infinitely fine and aliases at any sample count.',
+      },
+      {
+        label: 'Integration tolerance',
+        value: `${KERR_RENDER_TOLERANCE.toExponential(0)}, a hundred times tighter than the Schwarzschild scenes`,
+        note:
+          'A Kerr ray has no orbital-plane reduction and is followed twice as far, so it takes ' +
+          'several times the steps and accumulates more drift. The worst null residual over an ' +
+          'image scales linearly with the tolerance: on a 200 x 150 image it is 1.3e-9 at 1e-11 ' +
+          'and 1.4e-10 at 1e-12, so only 1e-12 keeps the whole image inside the same 1e-9 gate ' +
+          'the rest of the project meets. The render is slower instead of the gate being looser.',
+      },
+      {
+        label: 'Omitted physics',
+        value: 'No emission, no disk, no frequency shift applied to the background',
+        note:
+          'The grid is a visualization texture with no spectrum, drawn unshifted. Frame dragging ' +
+          'is in the geodesics, not painted on.',
       },
     ],
   };

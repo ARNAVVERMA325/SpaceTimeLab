@@ -434,8 +434,16 @@
               <select id="scene">
                 <option value="schwarzschild-disk" selected>Schwarzschild + thin disk</option>
                 <option value="schwarzschild-sky">Schwarzschild, sky grid</option>
+                <option value="kerr-sky">Kerr, sky grid</option>
                 <option value="minkowski">Minkowski (flat)</option>
               </select>
+            </div>
+            <div class="row" data-scenes="kerr-sky">
+              <label for="spin">Spin a/M</label>
+              <div class="slider">
+                <input id="spin" type="range" min="-0.998" max="0.998" step="0.002" value="0.9" />
+                <output id="spin-value"></output>
+              </div>
             </div>
             <div class="row" data-scenes="schwarzschild-disk schwarzschild-sky">
               <label for="observer">Camera</label>
@@ -444,7 +452,7 @@
                 <option value="free-fall">Falling from rest at infinity</option>
               </select>
             </div>
-            <div class="row" data-scenes="schwarzschild-disk">
+            <div class="row" data-scenes="schwarzschild-disk kerr-sky">
               <label for="inclination">Inclination</label>
               <div class="slider">
                 <input id="inclination" type="range" min="2" max="89" step="1" value="80" />

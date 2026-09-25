@@ -2,6 +2,7 @@ import type { Vec4 } from '../physics/core/indices.js';
 import { generateNullRay, localRayDirectionAt } from '../physics/observer/observer.js';
 import { frequencyRatio, STATIC_EMITTER } from '../physics/observer/frequency-shift.js';
 import { blackbodyXYZ, xyzToLinearSrgb } from '../physics/radiation/blackbody.js';
+import { constantsOfMotion } from '../physics/spacetimes/kerr-rays.js';
 import { asymptoticSweepTail } from '../physics/spacetimes/schwarzschild-analytic.js';
 import { criticalImpactParameter } from '../physics/spacetimes/schwarzschild.js';
 import type { PhaseSpaceState } from '../physics/core/phase-space.js';
@@ -150,8 +151,36 @@ export function inspectPixel(scene: BuiltScene, i: number, j: number): RayInspec
     },
   ];
 
-  const curved = scene.description.kind !== 'minkowski';
-  if (curved) {
+  if (scene.description.kind === 'kerr-sky') {
+    // Kerr is axisymmetric but not spherically symmetric, so the total angular momentum is
+    // not conserved and a single impact parameter does not describe the ray. The separable
+    // constants do: xi = L_z/E fixes the azimuthal motion and eta = Q/E^2 the polar motion.
+    const { energy_E, angular_momentum_Lz, carter_Q } = constantsOfMotion(
+      model as Parameters<typeof constantsOfMotion>[0],
+      initial.position_x,
+      initial.tangent,
+    );
+    const xi = angular_momentum_Lz / energy_E;
+    const eta = carter_Q / (energy_E * energy_E);
+    rows.push(
+      {
+        label: 'Constants of motion',
+        value: `xi = L_z / E = ${xi.toFixed(4)} M,  eta = Q / E^2 = ${eta.toFixed(4)} M^2`,
+        note:
+          'The two that separate the motion. A ray with xi > 0 carries angular momentum in the ' +
+          'direction of the spin. eta is zero only for a ray confined to the equatorial plane, ' +
+          'and both are conserved: E and L_z by the Killing vectors, Q by a Killing tensor.',
+      },
+      {
+        label: 'Shadow boundary',
+        value: 'Where the spherical photon orbits with these constants sit',
+        note:
+          'The edge of the shadow is the image of the unstable spherical photon orbits, whose ' +
+          'xi(r) and eta(r) come from R(r) = R\u2019(r) = 0. A ray is captured when its radial ' +
+          'potential has no root between it and the horizon, which is what decided this one.',
+      },
+    );
+  } else if (scene.description.kind !== 'minkowski') {
     const b = impactParameter(model, initial.position_x, initial.tangent);
     const bc = criticalImpactParameter(1);
     const margin = (b / bc - 1) * 100;
@@ -172,7 +201,13 @@ export function inspectPixel(scene: BuiltScene, i: number, j: number): RayInspec
     case 'captured':
       headline =
         'This line of sight ends on the black hole. No background light reaches the camera ' +
-        'along it, which is what makes the shadow dark.';
+        'along it, which is what makes the shadow dark.' +
+        (scene.description.kind === 'kerr-sky'
+          ? ' In Kerr that verdict is reached from the ray\u2019s own conserved quantities rather ' +
+            'than by following it down: with no root of the radial potential between the camera ' +
+            'and the horizon, there is no turning point for it to use, so the step count below is ' +
+            'small by construction.'
+          : '');
       break;
     case 'disk': {
       const sample = ray.disk;
@@ -239,7 +274,13 @@ export function inspectPixel(scene: BuiltScene, i: number, j: number): RayInspec
       break;
     }
     case 'background': {
-      const turned = totalSweepDeg(scene, initial, ray) ?? angleBetween(launchDirection, ray.exitDirection) * DEG;
+      const azimuthalWinding =
+        Math.abs(ray.final.position_x[3] - initial.position_x[3]) * DEG;
+      const turned =
+        totalSweepDeg(scene, initial, ray) ??
+        (scene.description.kind === 'kerr-sky'
+          ? azimuthalWinding
+          : angleBetween(launchDirection, ray.exitDirection) * DEG);
       const loops = turned / 360;
       headline =
         `This line of sight reaches the background sphere. The ray swept ${turned.toFixed(2)} degrees ` +
@@ -247,13 +288,17 @@ export function inspectPixel(scene: BuiltScene, i: number, j: number): RayInspec
           ? `around the hole \u2014 ${loops.toFixed(2)} full loops \u2014 before escaping, so this pixel shows a part of the sky the camera is nowhere near pointing at.`
           : 'between the camera and infinity, so it shows a part of the sky that far from where the camera is pointing.');
       rows.push({
-        label: 'Total sweep',
+        label: scene.description.kind === 'kerr-sky' ? 'Azimuthal winding' : 'Total sweep',
         value: `${turned.toFixed(4)} degrees${loops >= 1 ? `  (${loops.toFixed(2)} loops)` : ''}`,
         note:
-          'The angle the ray sweeps about the hole in its own orbital plane, from the camera out ' +
-          'to infinity. Exactly 0 in flat spacetime, and unbounded as b approaches b_c: a ray can ' +
-          'circle the photon sphere any number of times, which is what stacks the Einstein rings ' +
-          'against the shadow edge. ' +
+          (scene.description.kind === 'kerr-sky'
+            ? 'How far the ray was carried in phi between the camera and the background sphere. ' +
+              'In Kerr the motion is not planar, so this is the azimuthal part of it; a ray with ' +
+              'no angular momentum at all still winds, because the spacetime itself is rotating. '
+            : 'The angle the ray sweeps about the hole in its own orbital plane, from the camera ' +
+              'out to infinity. Exactly 0 in flat spacetime, and unbounded as b approaches b_c: a ' +
+              'ray can circle the photon sphere any number of times, which is what stacks the ' +
+              'Einstein rings against the shadow edge. ') +
           (ray.asymptoticallyCorrected
             ? 'The sweep beyond the integration radius is added from the orbit-equation tail integral, so it does not depend on where the integration stopped.'
             : 'Read off where the integration stopped, with no tail correction.'),

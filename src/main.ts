@@ -129,6 +129,8 @@ async function main(): Promise<void> {
   const exposureInput = element<HTMLInputElement>('exposure');
   const exposureValue = element<HTMLElement>('exposure-value');
   const skyGridInput = element<HTMLInputElement>('sky-grid');
+  const spinInput = element<HTMLInputElement>('spin');
+  const spinValue = element<HTMLElement>('spin-value');
 
   const threads = threadCount();
   const pool = typeof Worker === 'undefined' ? undefined : new RenderPool(threads);
@@ -151,6 +153,15 @@ async function main(): Promise<void> {
 
     if (kind === 'minkowski') return { ...common, kind };
     if (kind === 'schwarzschild-sky') return { ...common, kind, cameraRadius: 20, observer };
+    if (kind === 'kerr-sky') {
+      return {
+        ...common,
+        kind,
+        cameraRadius: 60,
+        inclinationDeg: Number.parseFloat(inclinationInput.value),
+        spin: Number.parseFloat(spinInput.value),
+      };
+    }
     return {
       ...common,
       kind: 'schwarzschild-disk',
@@ -171,6 +182,8 @@ async function main(): Promise<void> {
       field.hidden = !(field.dataset.scenes ?? '').split(' ').includes(kind);
     }
     inclinationValue.textContent = `${Number.parseFloat(inclinationInput.value).toFixed(0)}°`;
+    const spin = Number.parseFloat(spinInput.value);
+    spinValue.textContent = `${spin > 0 ? '+' : ''}${spin.toFixed(3)}`;
     const stops = Number.parseFloat(exposureInput.value);
     exposureValue.textContent = `${stops > 0 ? '+' : ''}${stops.toFixed(1)} EV`;
   }
@@ -338,7 +351,7 @@ async function main(): Promise<void> {
     control.addEventListener('change', () => void run());
   }
   skyGridInput.addEventListener('change', () => void run());
-  for (const slider of [inclinationInput, exposureInput]) {
+  for (const slider of [inclinationInput, exposureInput, spinInput]) {
     slider.addEventListener('input', syncControls);
     slider.addEventListener('change', () => void run());
   }

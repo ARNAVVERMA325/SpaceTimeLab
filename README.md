@@ -27,19 +27,24 @@ validated state, not work in progress.
 **Milestone 1 — Minkowski baseline & engine plumbing: gate passed.**
 **Milestone 2A — Exterior Schwarzschild, CPU reference: gate passed.**
 **Milestone 3 — Physical observers, frequency shift & thin accretion disk: gate passed.**
+**Milestone 4A — Kerr, Boyer–Lindquist exterior: gate passed.**
 
-Three scenes through one pipeline. Flat spacetime bends nothing, so the sky grid arrives
+Four scenes through one pipeline. Flat spacetime bends nothing, so the sky grid arrives
 exactly as a pinhole camera projects it. Schwarzschild bends light into a black hole
 shadow whose angular radius matches the closed-form prediction
 `sin(psi) = b_c sqrt(f) / r` to better than a part in a million. A Novikov–Thorne thin
 disk adds an emitting surface: its colour and brightness come from the frequency shift
 `g = (k . u_obs) / (k . u_emit)` of the rays that reach it, and the camera can be a
-hovering observer or one falling freely from rest at infinity.
+hovering observer or one falling freely from rest at infinity. Kerr adds spin: the shadow
+is displaced and flattened on the prograde side, matching Bardeen's analytic critical
+curve to within a pixel, and the camera is a zero-angular-momentum observer because a
+rotating spacetime admits no diagonal static frame.
 
-M3 was taken ahead of M2B deliberately — porting the pipeline to shaders before it had
-observers in motion and an emission model would have meant porting it twice. Milestone 2B
-(the WebGPU port) remains unblocked and untouched: the roadmap allows no shader work
-until the CPU reference is green, and it now is, with more in it. See `STATUS.md`.
+M3 and M4A were taken ahead of M2B deliberately — porting the pipeline to shaders before
+it had observers in motion, an emission model and a second spacetime would have meant
+porting it several times. Milestone 2B (the WebGPU port) remains unblocked and untouched:
+the roadmap allows no shader work until the CPU reference is green, and it now is, with
+much more in it. M4B (horizon-penetrating Kerr–Schild) is unblocked too. See `STATUS.md`.
 
 ## Running it
 
@@ -139,6 +144,23 @@ Milestone 3 — observers, frequency shift and the thin disk:
 | Inspector's b = L / E vs. r sin(psi) / sqrt(f) | < 1e-12 |
 | Inspector's outcome vs. the b_c capture threshold | Agrees on every pixel sampled |
 
+Milestone 4A — Kerr:
+
+| Check | Result |
+| --- | --- |
+| Metric, inverse, derivatives, Christoffels vs. independent SymPy | < 1e-12 relative |
+| Ricci-flat; Kretschmann vs. the full R_abcd R^abcd contraction | Zero; < 1e-15 relative |
+| Schwarzschild limit, component for component | < 1e-14 relative |
+| E, L_z conservation | Exact by construction |
+| Carter constant drift over a 300M trace | < 1e-9 relative |
+| Photon-orbit radius and ISCO vs. their defining equations | < 1e-12, < 1e-11 |
+| Photon orbits held over two turns | Radial wander < 1e-8 |
+| Exact capture criterion vs. brute force and vs. full integration | Agrees on every ray |
+| Extremal shadow spans alpha in [-2M, +7M] edge-on | < 1e-9 |
+| Shadow height exactly 2 x 3 sqrt(3) M at every spin | < 1e-6 relative |
+| Traced rays inside/outside the critical curve | Captured / escape, three spin-inclination pairs |
+| Rendered shadow vs. the analytic extent | Within 2 pixels |
+
 ## Four notes on the renders
 
 **In the flat scene, the grid lines curve.** That is rectilinear projection of a sphere,
@@ -149,8 +171,9 @@ with no integration at all — which is what the validation suite asserts. Any d
 from that reference would be a defect, not lensing.
 
 **Click a pixel.** That one ray is traced again on its own, with the same metric,
-integrator and tolerance, and reported in full: its impact parameter against
-`b_c = 3 sqrt(3) M`, where it ended, how far it swept around the hole — rays near the
+integrator and tolerance, and reported in full: in Schwarzschild its impact parameter
+against `b_c = 3 sqrt(3) M`, in Kerr the two constants `xi = L_z/E` and `eta = Q/E^2` that
+separate its motion, where it ended, how far it swept around the hole — rays near the
 shadow edge come back having looped more than once — and, for a ray that ends on the disk,
 the emission radius, the gas velocity there, the frequency shift split into its static and
 orbital factors, and the emitted and observed temperatures. A picture with a panel beside

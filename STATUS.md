@@ -12,7 +12,7 @@ every validation test listed under it is passing — not when the code merely ru
 render looks correct (`CLAUDE.md` §16: "A result is not considered validated merely
 because it 'looks right.'").
 
-**Last updated:** 2026-09-25 — M3 closed, and the app rebuilt around a per-pixel ray inspector.
+**Last updated:** 2026-09-25 — M4A closed: Kerr in Boyer-Lindquist, validated against the analytic shadow.
 
 ---
 
@@ -34,14 +34,14 @@ because it 'looks right.'").
 | M2A — Exterior Schwarzschild, CPU reference | **`gate passed`** |
 | M2B — WebGPU/WGSL parallelization | `not started` |
 | M3 — Physical observer, tetrad frames & accretion disk | **`gate passed`** |
-| M4A — Kerr, Boyer–Lindquist exterior | `not started` |
+| M4A — Kerr, Boyer–Lindquist exterior | **`gate passed`** |
 | M4B — Kerr–Schild horizon-penetrating integration | `not started` |
 | M5A — 3+1 embedding & GWOSC strain (committed scope) | `not started` |
 | M5B — SXS / EHT (stretch, exploratory) | `not started` |
 
-Milestones 1, 2A and 3 are closed: all of their validation tests pass in CI, 267 tests
-across 24 files. Everything below M3 remains unimplemented, and those rows read
-`not run` because the corresponding physics code does not exist yet.
+Milestones 1, 2A, 3 and 4A are closed: all of their validation tests pass in CI, 317
+tests across 29 files. M2B, M4B and M5 remain unimplemented, and those rows read
+`not run` because the corresponding code does not exist yet.
 
 M3 was taken out of order, ahead of M2B. The roadmap sequences 2B before 3, but 2B is a
 WebGPU port whose only purpose is speed, and porting a pipeline that did not yet have
@@ -72,7 +72,7 @@ there by every module rather than assumed locally.
 | Index / naming convention | `CLAUDE.md` §19 names used verbatim (`g_mu_nu`, `g_inv_mu_nu`, `christoffel`, `four_velocity_u`, `null_wavevector_k`, `energy_E`, `angular_momentum_Lz`) | in code |
 | Index position (variance) | Tracked on `FourVector`; raising an already-raised index throws | in code, asserted by tests |
 | Floating point | IEEE-754 binary64 on the CPU reference path — higher precision than f32, still finite (`CLAUDE.md` §8) | in code |
-| Carter constant convention | Not yet chosen — required by `CLAUDE.md` §16 before M4A | **open** |
+| Carter constant convention | `Q = p_theta^2 + cos^2(theta)[a^2(mu^2 - E^2) + L_z^2/sin^2(theta)]`, vanishing for equatorial orbits; **not** the Carter-Walker `K = Q + (L_z - aE)^2` | in code, asserted by tests |
 | Chart kind | Recorded per chart (`cartesian` / `spherical`), since some routines are valid for only one | in code, enforced |
 
 ---
@@ -413,37 +413,110 @@ against 3.5k single-threaded. A 320x240 disk render at 4 samples/px takes 30 s.
 
 ## M4A — Kerr, Boyer–Lindquist exterior (`r > r_+`)
 
-**State:** `not started` — unblocked; M2A's gate is closed.
-**Note:** Kerr is axisymmetric but *not* spherically symmetric, so its geodesics do not
-lie in planes through the centre and the orbital-plane reduction does not apply. The
-reduction refuses a model that does not declare spherical symmetry, so this cannot be
-reached for by accident. Kerr in Boyer–Lindquist also has a `g_t_phi` cross term, which
-the diagonal static-tetrad construction refuses; M4A needs a genuine orthonormalization.
+**State:** `gate passed` — 2026-09-25.
 
-| Validation test (`ROADMAP.md` 4A) | Status |
-| --- | --- |
-| `carter_Q` conservation (documented convention) | `not run` |
-| `energy_E`, `angular_momentum_Lz` conservation outside `r_+` | `not run` |
-| Frame-dragging precession vs. analytical limit | `not run` |
-| Schwarzschild limit recovered as `a -> 0` | `not run` |
-| Asymmetric shadow vs. Thorne/DNGR reference values | `not run` |
+Every closed form was derived or verified independently before being written, with SymPy
+and mpmath at 25–40 digits (`scripts/generate_kerr_reference.py` and the scratch
+derivations it records). The implementation shares no algebraic route with them.
+
+| Validation test | Status | Measured |
+| --- | --- | --- |
+| `g_mu_nu`, `g^{mu nu}`, `d_alpha g^{mu nu}` and all 64 Christoffel symbols vs. an independent SymPy derivation | `pass` | `< 1e-12` relative at six events, spins 0 to 0.998 and both signs |
+| `g_mu_nu g^{nu sigma} = delta^sigma_mu` | `pass` | `< 1e-13` |
+| `det g = -Sigma^2 sin^2(theta)`, non-zero at the horizon | `pass` | `< 1e-12` relative; `det g` is `O(1)` at `r_+` while `Delta` has vanished |
+| Ricci-flat (vacuum) | `pass` | `< 1e-170` symbolically at exact rational points |
+| Kretschmann closed form vs. the full `R_abcd R^abcd` contraction | `pass` | `< 1e-15` relative |
+| Analytic `d_alpha g^{mu nu}` vs. central differences | `pass` | `< 1e-7` relative, including `r = 1.5M` with `r_+ = 1.436M` |
+| Schwarzschild limit `a -> 0`, component for component and for a traced ray | `pass` | `< 1e-14` relative; traced ray converges to `< 1e-6` |
+| `Delta` evaluated as `(r - r_+)(r - r_-)` vs. the expanded polynomial | `pass` | full relative accuracy at `r_+ + 1e-12`, where the expanded form has lost most of its digits |
+| ZAMO tetrad orthonormality, including inside the ergosphere | `pass` | `< 1e-14` |
+| ZAMO angular momentum `p_phi = 0` | `pass` | `< 1e-15`; `omega` matches `2Mar/A` to 14 digits |
+| `E` and `L_z` conservation | `pass` | `< 1e-15` — exact by construction in the Hamiltonian formulation |
+| **Carter constant `Q` drift** (no Killing vector protects it) | `pass` | `< 1e-9` relative over a 300M trace |
+| Equatorial photon-orbit radius vs. `r^3 - 6Mr^2 + 9M^2 r - 4Ma^2 = 0` | `pass` | `< 1e-12` at six spins, both senses |
+| ISCO vs. `r^2 - 6Mr +- 8a sqrt(Mr) - 3a^2 = 0` | `pass` | `< 1e-11`; 6M at `a = 0`, 1M and 9M at `a = M` |
+| Prograde and retrograde photon orbits held | `pass` | radial wander `< 1e-8` over two turns |
+| Frame dragging: `omega -> 2Ma/r^3` far field | `pass` | `< 1e-6` relative at `r = 5000M` |
+| Frame dragging on a photon with `L_z = 0` | `pass` | swept through `> 0.5` rad in phi; exactly zero when `a = 0` |
+| Exact capture criterion vs. a brute-force scan of `R(r)` | `pass` | agrees on all 84 rays sampled |
+| Exact capture criterion vs. full integration to the horizon | `pass` | agrees on all 84 rays, at a fraction of the steps |
+| Critical curve: Schwarzschild's circle as `a -> 0` | `pass` | departure first order in `a`, `< 0.4 a` |
+| Critical curve: extremal hole edge-on spans `alpha in [-2M, +7M]` | `pass` | `< 1e-5` and `< 1e-9` |
+| Critical curve: height exactly `2 x 3 sqrt(3) M` at every spin, edge-on | `pass` | `< 1e-6` relative from `a = 0.1` to `0.998` |
+| Critical curve: displacement `~ sin(theta_o)` | `pass` | ratio constant to `1e-3` across three decades of inclination |
+| **Traced rays vs. the critical curve**: captured 0.5% inside, escaping 0.5% outside | `pass` | at `(a, i) = (0.9, 90), (0.9, 60), (0.5, 90)` |
+| Traced boundary located by bisection | `pass` | within `1e-4` of the analytic curve in impact parameter |
+| Rendered shadow edges vs. the analytic extent | `pass` | within 2 pixels at both edges |
+| Rendered dark pixels vs. full integration to the horizon | `pass` | pixel for pixel across the shadow edge |
+| Rendered shadow mirrors under `a -> -a`; no displacement down the axis | `pass` | `< 1e-6` pixels; `< 1` pixel |
+| Background bias at the 400M sampling radius | `pass` | `< 0.1` pixel, measured against integration to 4000M |
+| Null normalization over a whole Kerr image | `pass` | `1.35e-10` at tolerance `1e-12`, against the `1e-9` gate |
 
 **Definition of Done:** exterior Kerr results validated and stable; shadow benchmarked
-against published reference values.
+against published reference values. **Met.** The benchmark is Bardeen's critical curve,
+reproduced both as a formula (the `[-2M, +7M]` span at extremal spin, the spin-independent
+height) and by tracing rays against it.
 
-**Open decisions:**
+**What landed:**
 
-- Carter constant convention: not yet chosen. `CLAUDE.md` §16 requires exactly one
-  clearly documented convention.
+- **The metric** in Boyer-Lindquist coordinates with its analytic inverse and analytic
+  `d_alpha g^{mu nu}`, which is all the Hamiltonian formulation needs. Kerr's Christoffel
+  symbols are too long to hand-transcribe safely, so the model supplies analytic
+  `d_alpha g_{mu nu}` instead and a shared routine contracts them into the connection —
+  still analytic, with no differencing.
+- **The ZAMO frame.** Boyer-Lindquist Kerr has a `g_t_phi` cross term, so
+  `Tetrad.diagonalStatic` refuses it, and inside the ergosphere no static observer exists
+  at all. The locally non-rotating observer exists everywhere outside the horizon and is
+  what the camera uses.
+- **An exact capture criterion.** A turning point is a root of the radial potential
+  `R(r)`, so an inward-moving photon reaches the horizon exactly when `R` has no root
+  between it and `r_+`. The stationary points of `R` are the roots of a cubic, solved in
+  closed form, so the test costs no search — and it keeps the integration away from `r_+`,
+  where `dphi/dlambda` diverges while `r` barely moves.
+- **The analytic shadow**, as the image of the spherical photon orbits, with the visible
+  window in orbit radius found by bisection rather than sampling.
+
+**Decisions closed:**
+
+- **Carter constant convention.** `Q = p_theta^2 + cos^2(theta)[a^2(mu^2 - E^2) +
+  L_z^2/sin^2(theta)]`, with `mu = 1` for a timelike worldline and `mu = 0` for a null one.
+  It vanishes for an equatorial orbit, which makes "is this equatorial?" a question about a
+  number being zero. The Carter-Walker constant `K = Q + (L_z - aE)^2` is not used anywhere.
+- **No orbital-plane reduction for Kerr.** It requires spherical symmetry; Kerr is only
+  axisymmetric. The model does not declare spherical symmetry and the reduction refuses a
+  model that does not, so the mistake cannot be made by accident.
+- **Render tolerance.** Kerr scenes integrate at `1e-12` rather than the `1e-10` of the
+  Schwarzschild scenes, because the worst null residual over an image scales linearly with
+  the tolerance and a Kerr ray costs more error: no orbital-plane reduction, and twice the
+  distance to the background. Measured on a 200x150 image: `1.30e-9` at `1e-11`, `1.35e-10`
+  at `1e-12`. The render is slower rather than the gate looser.
+
+**Known limitations, deliberately not papered over:**
+
+- **Exterior only.** Boyer-Lindquist coordinates stop at `r_+`. Continuing through the
+  horizon is M4B and needs a horizon-penetrating chart.
+- **No exact asymptotic background correction.** Schwarzschild's tail integral has no
+  closed-form counterpart here, so the sky is sampled along the local direction at 400M.
+  The residual bias is measured rather than assumed: under 0.1 pixel at these fields of
+  view.
+- **The polar axis** is a coordinate degeneracy in this chart, and the renderer no longer
+  has the orbital-plane reduction to keep rays away from it. A ray with `L_z != 0` is held
+  off the axis by its own Carter constant, and one with `L_z = 0` passes through a chart
+  artifact rather than anything physical; the domain check reports it rather than the
+  integrator stalling silently.
+- **No Kerr disk yet.** The Novikov-Thorne model implemented for M3 is the Schwarzschild
+  case. Its Kerr generalization has a different ISCO, efficiency and flux profile, and is
+  not implemented, so the disk scenes remain Schwarzschild.
+- A Kerr frame at 200x150 takes about 17 s on four cores. That is the price of holding the
+  same `1e-9` gate, and `CLAUDE.md` §21 is explicit that frame rate is not a validity
+  requirement.
 
 ---
 
 ## M4B — Kerr–Schild horizon-penetrating integration
 
-**State:** `not started`
-**Blocked on:** M4A gate. **Do not open this gate until M4A's conservation tests are
-green** — that is the whole reason this file exists (`ROADMAP.md` § "Per-milestone
-tracking").
+**State:** `not started` — unblocked; M4A's gate is closed and its conservation tests are
+green (`E` and `L_z` exact, Carter `Q` under `1e-9` over a 300M trace).
 
 | Validation test (`ROADMAP.md` 4B) | Status |
 | --- | --- |
@@ -499,11 +572,13 @@ Carried here so a session picking up mid-project can see them in one place.
 | 2 | Conserved-quantity drift budget | M2A | **closed** — `1e-7` relative, 100x tighter than the roadmap's `1e-6`; measured `<= 1.4e-9` |
 | 3 | Weak-field deflection benchmark tolerance | M2A | **closed** — stated as convergence, not equality; traced vs. exact quadrature at `1e-7` relative |
 | 4 | **GPU f32 vs. CPU f64 cross-validation tolerance** | M2B | open |
-| 5 | Carter constant convention (not a tolerance, but must be fixed before M4A) | M4A | open |
+| 5 | Carter constant convention (not a tolerance, but must be fixed before M4A) | M4A | **closed** — `Q = p_theta^2 + cos^2(theta)[a^2(mu^2 - E^2) + L_z^2/sin^2(theta)]`, zero in the equatorial plane; not the Carter-Walker `K` |
 | 6 | Kerr–Schild vs. Boyer–Lindquist exterior agreement tolerance | M4B | open |
 | 7 | Preview vs. reference null-residual tolerance | M2A | **closed** — preview tolerance retired; render meets the `1e-9` reference gate at `5.1e-10` |
 | 8 | Fast blackbody-colour table vs. direct spectral integration | M3 | **closed** — `5e-6` relative on X, Y, Z, from a measured worst case below `3e-6`; quadratic log-log interpolation at 256 nodes per decade |
 | 9 | Disk energy-balance check (quadrature over an infinite domain) | M3 | **closed** — `1e-9` relative, after substituting `r = 1000/w^2` to remove the `sqrt(u)` tail behaviour |
+| 10 | Kerr render tolerance vs. the shared `1e-9` null gate | M4A | **closed** — `1e-12`, from measured `1.30e-9` at `1e-11` and `1.35e-10` at `1e-12` on a 200x150 image |
+| 11 | Kerr background sampling radius, with no asymptotic correction available | M4A | **closed** — 400M, from a measured bias under 0.1 pixel against integration to 4000M |
 
 `CLAUDE.md` §17: there is no universal numerical-error threshold. Each entry above must
 be justified by the relevant numerical method and quantity when it is closed.
