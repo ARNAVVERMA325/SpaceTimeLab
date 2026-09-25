@@ -6,253 +6,564 @@
     <title>Spacetime Lab</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='none' stroke='%237aa2f7' stroke-width='1.5'/><circle cx='8' cy='8' r='2' fill='%237aa2f7'/></svg>"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='none' stroke='%237fb2ff' stroke-width='1.25'/><circle cx='8' cy='8' r='2.6' fill='%2305070c'/></svg>"
     />
     <style>
+      /*
+        One committed dark palette, not a theme choice: the page exists to show a rendered
+        astronomical image, and a light ground would wreck how that image reads. The
+        neutrals are biased slightly blue toward the accent so they look chosen rather
+        than inherited; the warm accent is taken from the disk's own blackbody colours.
+      */
       :root {
         color-scheme: dark;
-        --bg: #0b0e15;
-        --panel: #141926;
-        --border: #232a3d;
-        --text: #e6eaf3;
-        --muted: #98a2bb;
-        --accent: #7aa2f7;
-        --ok: #7bd88f;
-        --warn: #e0af68;
-        --fail: #f7768e;
+        --void: #05070c;
+        --slate: #0c1119;
+        --well: #121a26;
+        --line: #1d2836;
+        --line-soft: #161f2c;
+        --ink: #e3e9f4;
+        --ink-dim: #8a97b0;
+        --ink-faint: #5e6b83;
+        --beam: #7fb2ff;
+        --ember: #e0a267;
+        --ok: #62d69f;
+        --warn: #e6b565;
+        --fail: #ff7a93;
+
+        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, monospace;
+
+        --s1: 4px;
+        --s2: 8px;
+        --s3: 12px;
+        --s4: 16px;
+        --s5: 24px;
+        --s6: 32px;
       }
+
       * { box-sizing: border-box; }
+
+      html, body { height: 100%; }
+
       body {
         margin: 0;
-        background: var(--bg);
-        color: var(--text);
-        font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: var(--void);
+        color: var(--ink);
+        font: 15px/1.55 var(--sans);
+        -webkit-font-smoothing: antialiased;
       }
-      header {
-        padding: 24px 24px 12px;
-        border-bottom: 1px solid var(--border);
-      }
-      h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: -0.01em; }
-      .subtitle { margin: 0; color: var(--muted); font-size: 14px; }
-      main {
-        display: grid;
-        grid-template-columns: minmax(320px, 1fr) minmax(320px, 460px);
-        gap: 24px;
-        padding: 24px;
-        align-items: start;
-      }
-      @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-      figure { margin: 0; }
-      .controls {
+
+      /* ---------- masthead ---------- */
+
+      .masthead {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        align-items: center;
-        margin-bottom: 12px;
+        align-items: baseline;
+        gap: var(--s3) var(--s4);
+        padding: var(--s5) var(--s5) var(--s4);
+        border-bottom: 1px solid var(--line);
       }
-      .controls label {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--muted);
+      .masthead h1 {
+        margin: 0;
+        font-size: 19px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
       }
-      .controls .field {
+      .masthead p {
+        margin: 0;
+        flex: 1 1 380px;
+        max-width: 68ch;
+        color: var(--ink-dim);
+        font-size: 13.5px;
+      }
+      .gates {
+        display: flex;
+        gap: var(--s2);
+        flex-wrap: wrap;
+      }
+
+      .chip {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-      }
-      .controls .field[hidden] { display: none; }
-      .controls .checkbox input { accent-color: var(--accent); }
-      .controls output {
+        padding: 3px 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--slate);
+        color: var(--ink-dim);
+        font-family: var(--mono);
+        font-size: 11px;
         font-variant-numeric: tabular-nums;
-        color: var(--text);
-        letter-spacing: 0;
+        white-space: nowrap;
       }
-      .controls input[type="range"] { width: 110px; accent-color: var(--accent); }
-      .controls select,
-      .controls button {
-        background: var(--panel);
-        color: var(--text);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 6px 10px;
-        font: inherit;
-        font-size: 13px;
+      .chip::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
       }
-      .controls button { cursor: pointer; }
-      .controls button:disabled { opacity: 0.5; cursor: progress; }
+      .chip.passed { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
+      .chip.open { color: var(--ink-faint); }
+      .chip.plain::before { display: none; }
+
+      /* ---------- layout ---------- */
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+        gap: var(--s5);
+        padding: var(--s5);
+        align-items: start;
+      }
+      @media (max-width: 1040px) {
+        main { grid-template-columns: minmax(0, 1fr); }
+      }
+      @media (max-width: 560px) {
+        .masthead, main { padding-left: var(--s4); padding-right: var(--s4); }
+      }
+
+      .card {
+        background: var(--slate);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+
+      /* ---------- viewport ---------- */
+
+      .viewport { overflow: hidden; }
+
+      .rail {
+        position: relative;
+        height: 2px;
+        background: var(--line-soft);
+      }
+      .rail span {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 0;
+        background: var(--beam);
+        transition: width 120ms linear;
+      }
+      .rail[data-state="done"] span { background: var(--ok); }
+      .rail[data-state="failed"] span { background: var(--fail); }
+
+      .frame {
+        position: relative;
+        background: #02040a;
+        line-height: 0;
+      }
       canvas {
         width: 100%;
         height: auto;
         display: block;
-        background: #05070c;
-        border: 1px solid var(--border);
-        border-radius: 8px;
         image-rendering: pixelated;
+        cursor: crosshair;
       }
-      figcaption {
-        margin-top: 10px;
-        color: var(--muted);
-        font-size: 13px;
+      /* Has to stay legible over a black shadow and over a saturated disk alike. */
+      .crosshair {
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        margin: -9px 0 0 -9px;
+        border: 1.5px solid #fff;
+        border-radius: 50%;
+        box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.75), inset 0 0 0 1.5px rgba(0, 0, 0, 0.55);
+        pointer-events: none;
       }
-      #status {
-        margin-top: 10px;
-        padding: 8px 10px;
+      .hint {
+        position: absolute;
+        right: var(--s3);
+        bottom: var(--s3);
+        padding: 3px 8px;
         border-radius: 6px;
-        border: 1px solid var(--border);
-        background: var(--panel);
-        font-size: 13px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: rgba(5, 7, 12, 0.72);
+        color: var(--ink-dim);
+        font-size: 11.5px;
+        line-height: 1.4;
       }
-      #status[data-health="ok"] { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
-      #status[data-health="degraded"] { border-color: var(--warn); color: var(--warn); }
-      #status[data-health="failed"] { border-color: var(--fail); color: var(--fail); }
-      .panel {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 16px 18px;
-        margin-bottom: 16px;
+
+      .readout {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--s2) var(--s4);
+        padding: 10px var(--s4);
+        border-top: 1px solid var(--line);
+        font-family: var(--mono);
+        font-size: 11.5px;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink-dim);
       }
-      .panel h2 {
-        margin: 0 0 4px;
+      .readout b { color: var(--ink); font-weight: 500; }
+      .verdict { margin-left: auto; }
+      .verdict.ok { color: var(--ok); }
+      .verdict.degraded { color: var(--warn); }
+      .verdict.failed { color: var(--fail); }
+
+      figure { margin: 0; }
+      figcaption {
+        margin-top: var(--s3);
+        max-width: 78ch;
+        color: var(--ink-dim);
         font-size: 13px;
+      }
+
+      /* ---------- controls ---------- */
+
+      .controls { padding: var(--s4); display: grid; gap: var(--s4); }
+
+      .group { display: grid; gap: var(--s2); }
+      .group > h3 {
+        margin: 0;
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--accent);
+        color: var(--ink-faint);
       }
-      .panel > p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
-      .entry { padding: 9px 0; border-top: 1px solid var(--border); }
-      .entry:first-of-type { border-top: none; }
+      .row {
+        display: grid;
+        grid-template-columns: 92px minmax(0, 1fr);
+        align-items: center;
+        gap: var(--s3);
+      }
+      .row > label { font-size: 12.5px; color: var(--ink-dim); }
+      .row output {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink);
+        min-width: 44px;
+        text-align: right;
+      }
+      .slider { display: flex; align-items: center; gap: var(--s3); }
+      .slider input { flex: 1; }
+
+      select,
+      button,
+      input[type="range"] {
+        font: inherit;
+        color: inherit;
+        accent-color: var(--beam);
+      }
+      select {
+        width: 100%;
+        padding: 6px 9px;
+        font-size: 13px;
+        background: var(--well);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+      }
+      select:focus-visible,
+      button:focus-visible,
+      input:focus-visible,
+      .tab:focus-visible {
+        outline: 2px solid var(--beam);
+        outline-offset: 2px;
+      }
+      input[type="range"] { height: 20px; }
+      .switch { display: flex; align-items: center; gap: var(--s2); font-size: 12.5px; color: var(--ink-dim); }
+
+      .actions { display: flex; gap: var(--s2); }
+      button {
+        flex: 1;
+        padding: 8px 12px;
+        font-size: 13px;
+        background: var(--well);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--beam) 45%, var(--line)); }
+      button.primary { background: color-mix(in srgb, var(--beam) 16%, var(--well)); border-color: color-mix(in srgb, var(--beam) 40%, var(--line)); }
+      button:disabled { opacity: 0.45; cursor: default; }
+
+      /* ---------- tabbed panel ---------- */
+
+      .sidebar { display: grid; gap: var(--s4); }
+
+      .tabs {
+        display: flex;
+        gap: var(--s1);
+        padding: var(--s2) var(--s2) 0;
+        border-bottom: 1px solid var(--line);
+        overflow-x: auto;
+      }
+      .tab {
+        padding: 7px 11px;
+        border: 0;
+        border-radius: 7px 7px 0 0;
+        background: none;
+        color: var(--ink-faint);
+        font-size: 12.5px;
+        white-space: nowrap;
+        cursor: pointer;
+        flex: 0 0 auto;
+      }
+      .tab[aria-selected="true"] {
+        color: var(--ink);
+        background: var(--well);
+        box-shadow: inset 0 -2px 0 var(--beam);
+      }
+      .panes { padding: var(--s3) var(--s4) var(--s4); }
+      .pane > p.lede { margin: 0 0 var(--s3); color: var(--ink-dim); font-size: 12.5px; }
+
+      .entry { padding: 10px 0; border-top: 1px solid var(--line-soft); }
+      .entry:first-child { border-top: 0; padding-top: 2px; }
       .entry-label {
-        font-size: 11px;
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.09em;
         text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--muted);
+        color: var(--ink-faint);
       }
-      .entry-value { margin-top: 2px; font-size: 14px; }
-      .entry-note { margin-top: 4px; font-size: 12.5px; color: var(--muted); }
-      details summary { cursor: pointer; color: var(--accent); font-size: 13px; }
-      footer { padding: 0 24px 32px; color: var(--muted); font-size: 12.5px; }
-      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .entry-value {
+        margin-top: 3px;
+        font-size: 13.5px;
+        display: flex;
+        align-items: baseline;
+        gap: var(--s2);
+      }
+      .entry-value.numeric { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+      .entry.ok .entry-value { color: var(--ok); }
+      .entry.warn .entry-value { color: var(--warn); }
+      .entry.fail .entry-value { color: var(--fail); }
+      .swatch {
+        width: 11px;
+        height: 11px;
+        border-radius: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        flex: 0 0 auto;
+        align-self: center;
+      }
+      .entry details { margin-top: 5px; }
+      .entry summary {
+        display: inline-block;
+        color: var(--ink-faint);
+        font-size: 11.5px;
+        cursor: pointer;
+        list-style: none;
+      }
+      .entry summary::-webkit-details-marker { display: none; }
+      .entry summary::before { content: "▸ "; }
+      .entry details[open] summary::before { content: "▾ "; }
+      .entry summary:hover { color: var(--beam); }
+      .entry .note {
+        margin-top: var(--s1);
+        padding-left: 11px;
+        border-left: 1px solid var(--line);
+        color: var(--ink-dim);
+        font-size: 12.5px;
+        max-width: 60ch;
+      }
+
+      .pane-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--s3);
+        margin-bottom: var(--s2);
+      }
+      .ghost {
+        flex: 0 0 auto;
+        padding: 4px 9px;
+        font-size: 11.5px;
+        background: none;
+        border-color: var(--line-soft);
+        color: var(--ink-faint);
+      }
+
+      .empty {
+        margin: 0;
+        padding: var(--s5) 0;
+        color: var(--ink-faint);
+        font-size: 13px;
+        text-align: center;
+      }
+
+      footer {
+        padding: 0 var(--s5) var(--s6);
+        max-width: 96ch;
+        color: var(--ink-faint);
+        font-size: 12.5px;
+      }
+      footer code { font-family: var(--mono); color: var(--ink-dim); }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; }
+      }
     </style>
   </head>
   <body>
-    <header>
+    <header class="masthead">
       <h1>Spacetime Lab</h1>
-      <p class="subtitle">
-        Backward null-geodesic ray tracing through a chosen spacetime. One pipeline,
-        three scenes: flat spacetime bends nothing, Schwarzschild bends light into a
-        shadow and an Einstein ring, and a Novikov&ndash;Thorne thin disk is coloured by
-        the frequency shift of the rays that reach it. Every number on the right comes
-        from the render you are looking at.
+      <p>
+        Backward null-geodesic ray tracing through a chosen spacetime. Click anywhere in
+        the image to re-trace that single ray and see what it did.
       </p>
+      <div class="gates">
+        <span class="chip passed">M1 · M2A · M3</span>
+        <span class="chip open">M2B · M4 open</span>
+      </div>
     </header>
 
     <main>
       <figure>
-        <div class="controls">
-          <span class="field">
-            <label for="scene">Scene</label>
-            <select id="scene">
-              <option value="schwarzschild-disk" selected>Schwarzschild + thin accretion disk</option>
-              <option value="schwarzschild-sky">Schwarzschild, background grid only</option>
-              <option value="minkowski">Minkowski (flat) baseline</option>
-            </select>
-          </span>
-          <span class="field">
-            <label for="resolution">Width</label>
-            <select id="resolution">
-              <option value="120">120 px</option>
-              <option value="200" selected>200 px</option>
-              <option value="320">320 px</option>
-              <option value="480">480 px (slow)</option>
-            </select>
-          </span>
-          <span class="field">
-            <label for="samples">Samples</label>
-            <select id="samples">
-              <option value="1" selected>1 / px</option>
-              <option value="2">4 / px</option>
-              <option value="3">9 / px (slow)</option>
-            </select>
-          </span>
-          <span class="field" data-scenes="schwarzschild-disk schwarzschild-sky">
-            <label for="observer">Camera</label>
-            <select id="observer">
-              <option value="static" selected>Static (hovering)</option>
-              <option value="free-fall">Free-falling from rest at infinity</option>
-            </select>
-          </span>
-          <span class="field" data-scenes="schwarzschild-disk">
-            <label for="inclination">Inclination <output id="inclination-value"></output></label>
-            <input id="inclination" type="range" min="2" max="89" step="1" value="80" />
-          </span>
-          <span class="field" data-scenes="schwarzschild-disk">
-            <label for="mass">Mass</label>
-            <select id="mass">
-              <option value="1e8">1e8 solar masses</option>
-              <option value="1e9">1e9 solar masses</option>
-              <option value="1e10">1e10 solar masses</option>
-              <option value="4e10" selected>4e10 solar masses</option>
-            </select>
-          </span>
-          <span class="field" data-scenes="schwarzschild-disk">
-            <label for="eddington">Accretion rate</label>
-            <select id="eddington">
-              <option value="0.01" selected>0.01 Eddington</option>
-              <option value="0.1">0.1 Eddington</option>
-              <option value="0.3">0.3 Eddington</option>
-            </select>
-          </span>
-          <span class="field" data-scenes="schwarzschild-disk">
-            <label for="exposure">Exposure <output id="exposure-value"></output></label>
-            <input id="exposure" type="range" min="-4" max="4" step="0.5" value="0" />
-          </span>
-          <span class="field checkbox" data-scenes="schwarzschild-disk">
-            <input id="sky-grid" type="checkbox" />
-            <label for="sky-grid">Sky grid</label>
-          </span>
-          <button id="render" type="button">Re-render</button>
+        <div class="card viewport">
+          <div class="rail" id="rail"><span id="rail-fill"></span></div>
+          <div class="frame" id="frame">
+            <canvas id="view" width="200" height="150"></canvas>
+            <div class="hint">Click a pixel to inspect its ray</div>
+          </div>
+          <div class="readout">
+            <span id="status">Starting the first render…</span>
+            <span class="verdict" id="verdict"></span>
+          </div>
         </div>
-        <canvas id="view" width="200" height="150"></canvas>
-        <div id="status">Initializing…</div>
         <figcaption id="headline"></figcaption>
       </figure>
 
-      <div>
-        <section class="panel">
-          <h2>Model &amp; assumptions</h2>
-          <p>What was computed, in which coordinates, for which observer.</p>
-          <div id="model-entries"></div>
+      <div class="sidebar">
+        <section class="card controls">
+          <div class="group">
+            <h3>Scene</h3>
+            <div class="row">
+              <label for="scene">Spacetime</label>
+              <select id="scene">
+                <option value="schwarzschild-disk" selected>Schwarzschild + thin disk</option>
+                <option value="schwarzschild-sky">Schwarzschild, sky grid</option>
+                <option value="minkowski">Minkowski (flat)</option>
+              </select>
+            </div>
+            <div class="row" data-scenes="schwarzschild-disk schwarzschild-sky">
+              <label for="observer">Camera</label>
+              <select id="observer">
+                <option value="static" selected>Static, hovering</option>
+                <option value="free-fall">Falling from rest at infinity</option>
+              </select>
+            </div>
+            <div class="row" data-scenes="schwarzschild-disk">
+              <label for="inclination">Inclination</label>
+              <div class="slider">
+                <input id="inclination" type="range" min="2" max="89" step="1" value="80" />
+                <output id="inclination-value"></output>
+              </div>
+            </div>
+          </div>
+
+          <div class="group" data-scenes="schwarzschild-disk">
+            <h3>Accretion disk</h3>
+            <div class="row">
+              <label for="mass">Mass</label>
+              <select id="mass">
+                <option value="1e8">10⁸ M☉</option>
+                <option value="1e9">10⁹ M☉</option>
+                <option value="1e10">10¹⁰ M☉</option>
+                <option value="4e10" selected>4 × 10¹⁰ M☉</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="eddington">Accretion</label>
+              <select id="eddington">
+                <option value="0.01" selected>0.01 Eddington</option>
+                <option value="0.1">0.1 Eddington</option>
+                <option value="0.3">0.3 Eddington</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="exposure">Exposure</label>
+              <div class="slider">
+                <input id="exposure" type="range" min="-4" max="4" step="0.5" value="0" />
+                <output id="exposure-value"></output>
+              </div>
+            </div>
+            <div class="row">
+              <label for="sky-grid">Background</label>
+              <span class="switch"><input id="sky-grid" type="checkbox" /> Draw the sky grid</span>
+            </div>
+          </div>
+
+          <div class="group">
+            <h3>Render</h3>
+            <div class="row">
+              <label for="resolution">Width</label>
+              <select id="resolution">
+                <option value="120">120 px</option>
+                <option value="200" selected>200 px</option>
+                <option value="320">320 px</option>
+                <option value="480">480 px — slow</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="samples">Samples</label>
+              <select id="samples">
+                <option value="1" selected>1 per pixel</option>
+                <option value="2">4 per pixel</option>
+                <option value="3">9 per pixel — slow</option>
+              </select>
+            </div>
+            <div class="actions">
+              <button id="render" class="primary" type="button">Re-render</button>
+              <button id="stop" type="button" disabled>Stop</button>
+            </div>
+          </div>
         </section>
 
-        <section class="panel">
-          <h2>Validation status</h2>
-          <p>
-            A result is not validated because it looks right. These are the invariants
-            checked on this render, and the tolerances they were checked against.
-          </p>
-          <div id="validation-entries"></div>
-        </section>
+        <section class="card">
+          <div class="tabs" role="tablist">
+            <button class="tab" id="tab-model" role="tab" aria-controls="pane-model" aria-selected="true">Model</button>
+            <button class="tab" id="tab-validation" role="tab" aria-controls="pane-validation" aria-selected="false">Validation</button>
+            <button class="tab" id="tab-ray" role="tab" aria-controls="pane-ray" aria-selected="false">Ray</button>
+            <button class="tab" id="tab-data" role="tab" aria-controls="pane-data" aria-selected="false">Data</button>
+          </div>
+          <div class="panes">
+            <div class="pane" id="pane-model" role="tabpanel" aria-labelledby="tab-model">
+              <div class="pane-head">
+                <p class="lede">What was computed, in which coordinates, for which observer.</p>
+                <button class="ghost" id="expand-model" type="button">Expand all</button>
+              </div>
+              <div id="model-entries"></div>
+            </div>
 
-        <section class="panel">
-          <h2>Data hierarchy</h2>
-          <p id="data-hierarchy"></p>
+            <div class="pane" id="pane-validation" role="tabpanel" aria-labelledby="tab-validation" hidden>
+              <div class="pane-head">
+                <p class="lede">
+                  A result is not validated because it looks right. These are the invariants
+                  checked on this render and the tolerances they were judged against.
+                </p>
+                <button class="ghost" id="expand-validation" type="button">Expand all</button>
+              </div>
+              <div id="validation-entries"></div>
+            </div>
+
+            <div class="pane" id="pane-ray" role="tabpanel" aria-labelledby="tab-ray" hidden>
+              <p class="lede" id="ray-headline">
+                Click a pixel in the image. That one ray is traced again on its own, with the
+                same metric, integrator and tolerance, and reported in full.
+              </p>
+              <div id="ray-entries"></div>
+            </div>
+
+            <div class="pane" id="pane-data" role="tabpanel" aria-labelledby="tab-data" hidden>
+              <p class="lede">Which category of result every number above belongs to (CLAUDE.md §11).</p>
+              <p id="data-hierarchy"></p>
+            </div>
+          </div>
         </section>
       </div>
     </main>
 
     <footer>
-      The photon follows a null geodesic of the chosen spacetime. The background grid is
-      a visualization mapping on a sphere at fixed coordinate radius, not a physical
-      emitting surface. The accretion disk is an analytical Novikov&ndash;Thorne model
-      radiating as a local blackbody; it does not model plasma, scattering, returning
-      radiation or radiative transfer, and it is not a prediction of any observed image.
-      This is the CPU reference path, traced in parallel Web Workers: the assembled image
-      is bit-identical to a single-threaded render, and interactive frame rates are a
-      separate milestone with its own cross-validation gate. See <code>CLAUDE.md</code>
-      for the project rules and <code>STATUS.md</code> for validated milestone state.
+      The photon follows a null geodesic of the chosen spacetime. The background grid is a
+      visualization mapping on a sphere at fixed coordinate radius, not a physical emitting
+      surface. The accretion disk is an analytical Novikov–Thorne model radiating as a local
+      blackbody: no plasma, no scattering, no returning radiation, no radiative transfer, and
+      not a prediction of any observed image. This is the CPU reference path, traced in
+      parallel Web Workers; the assembled image is bit-identical to a single-threaded render.
+      See <code>CLAUDE.md</code> for the project rules and <code>STATUS.md</code> for
+      validated milestone state.
     </footer>
 
     <script type="module" src="/src/main.ts"></script>

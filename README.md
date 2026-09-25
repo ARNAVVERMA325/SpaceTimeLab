@@ -136,8 +136,10 @@ Milestone 3 — observers, frequency shift and the thin disk:
 | Disk temperature vs. independent CODATA 2018 calculation | < 1e-9 relative |
 | Blackbody chromaticity vs. `colour-science` at 1 nm | < 1e-4 in CIE (x, y) |
 | Parallel render vs. serial | Bit-identical, all scenes |
+| Inspector's b = L / E vs. r sin(psi) / sqrt(f) | < 1e-12 |
+| Inspector's outcome vs. the b_c capture threshold | Agrees on every pixel sampled |
 
-## Three notes on the renders
+## Four notes on the renders
 
 **In the flat scene, the grid lines curve.** That is rectilinear projection of a sphere,
 not light deflection: a pinhole camera maps great circles to straight lines, so meridians
@@ -145,6 +147,15 @@ appear straight while parallels do not. In flat spacetime the traced image is id
 pixel for pixel, to sampling the background along each pixel's initial viewing direction
 with no integration at all — which is what the validation suite asserts. Any deviation
 from that reference would be a defect, not lensing.
+
+**Click a pixel.** That one ray is traced again on its own, with the same metric,
+integrator and tolerance, and reported in full: its impact parameter against
+`b_c = 3 sqrt(3) M`, where it ended, how far it swept around the hole — rays near the
+shadow edge come back having looped more than once — and, for a ray that ends on the disk,
+the emission radius, the gas velocity there, the frequency shift split into its static and
+orbital factors, and the emitted and observed temperatures. A picture with a panel beside
+it only half answers "what am I looking at"; a single line of sight answers it for the
+pixel actually in question.
 
 **The disk's colour is a rendering of a computed spectrum, not a measurement.** What the
 engine produces is the frequency ratio `g` and the observed blackbody temperature `g T`

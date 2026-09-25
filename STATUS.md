@@ -12,7 +12,7 @@ every validation test listed under it is passing — not when the code merely ru
 render looks correct (`CLAUDE.md` §16: "A result is not considered validated merely
 because it 'looks right.'").
 
-**Last updated:** 2026-09-24 — M3 closed: observers in motion, frequency shift, Novikov-Thorne thin disk, colorimetry, and parallel CPU rendering.
+**Last updated:** 2026-09-25 — M3 closed, and the app rebuilt around a per-pixel ray inspector.
 
 ---
 
@@ -39,8 +39,8 @@ because it 'looks right.'").
 | M5A — 3+1 embedding & GWOSC strain (committed scope) | `not started` |
 | M5B — SXS / EHT (stretch, exploratory) | `not started` |
 
-Milestones 1, 2A and 3 are closed: all of their validation tests pass in CI, 261 tests
-across 23 files. Everything below M3 remains unimplemented, and those rows read
+Milestones 1, 2A and 3 are closed: all of their validation tests pass in CI, 267 tests
+across 24 files. Everything below M3 remains unimplemented, and those rows read
 `not run` because the corresponding physics code does not exist yet.
 
 M3 was taken out of order, ahead of M2B. The roadmap sequences 2B before 3, but 2B is a
@@ -338,6 +338,9 @@ the code; nothing is checked against a stored output of the same function.
 | Rendered disk: far side lensed over the shadow (Luminet 1979) | `pass` | lit pixels above the shadow centre |
 | Rendered disk: face-on view symmetric and wholly redshifted | `pass` | `g_max < 1`; left/right within `10%` |
 | Parallel render bit-identical to serial | `pass` | every byte and every linear-radiance value, all four scene kinds |
+| Inspector's `b = L / E` vs. `r sin(psi) / sqrt(f)` | `pass` | `< 1e-12` |
+| Inspector's traced outcome vs. the `b_c` capture threshold | `pass` | agrees on every pixel sampled across an image |
+| Swept angle falls monotonically with `b`; zero in flat spacetime | `pass` | `< 1e-6` degrees in Minkowski |
 | Null normalization over a whole disk image | `pass` | `<= 6.0e-10` against the `1e-9` gate |
 
 **Definition of Done:** toggling static vs. free-falling observer visibly and correctly
@@ -367,6 +370,15 @@ Doppler rows above are the "correctly", and the app exposes the toggle.
 - **A disclosed display mapping.** Exposure is relative to the luminance of the hottest
   ring seen at rest; the Reinhard curve is applied at encode only. The linear radiance
   behind every pixel is kept unmodified, so the tone curve cannot leak into a measurement.
+- **A pixel inspector.** Clicking the image re-traces that one ray with the scene's own
+  configuration and reports it: impact parameter `b = L / E` against `b_c = 3 sqrt(3) M`,
+  where it ended, how far it swept around the hole, and for a disk hit the emission radius,
+  the gas velocity there, `g` split into its static and orbital factors, and the emitted and
+  observed temperatures with the colour of that spectrum. Its own tests check it against
+  closed forms rather than against itself: `b` matches `r sin(psi) / sqrt(f)` to `1e-12`, the
+  traced outcome agrees with the `b_c` threshold on every pixel asked about, the swept angle
+  falls monotonically with `b` as the strong-deflection limit requires, and flat spacetime
+  reports no sweep at all.
 - **Parallel CPU rendering.** Rows are dealt round-robin to a pool of Web Workers, which
   rebuild the scene from a plain-data `SceneDescription` — the same function the main
   thread uses. Interleaved rather than banded, because rays near the shadow edge cost many

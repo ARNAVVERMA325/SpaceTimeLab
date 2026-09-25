@@ -22,6 +22,8 @@ export interface ProvenanceEntry {
   readonly label: string;
   readonly value: string;
   readonly note?: string;
+  /** Semantic state, so a verdict reads as one at a glance rather than as more prose. */
+  readonly tone?: 'ok' | 'warn' | 'fail';
 }
 
 export interface ProvenanceReport {
@@ -139,10 +141,12 @@ export function buildProvenanceReport(options: {
         diagnostics.health.level === 'ok'
           ? 'All checked invariants within validated tolerance'
           : diagnostics.health.messages.join(' '),
+      tone: diagnostics.health.level === 'ok' ? 'ok' : diagnostics.health.level === 'degraded' ? 'warn' : 'fail',
     },
     {
       label: 'Null normalization',
       value: `max |g_mu_nu k^mu k^nu| = ${nullResidualText}`,
+      tone: diagnostics.maxNullResidual <= diagnostics.residualTolerance.value ? 'ok' : 'fail',
       note:
         'Target is exactly 0 for a null geodesic. Judged against the ' +
         `"${diagnostics.residualTolerance.id}" tolerance of ` +
@@ -167,6 +171,7 @@ export function buildProvenanceReport(options: {
           {
             label: 'Failed pixels',
             value: `${diagnostics.pixelsWithFailures} pixel(s) drawn in magenta`,
+            tone: 'fail' as const,
             note:
               'A pixel containing any numerically failed sample is painted in the failure ' +
               'colour instead of being averaged into a plausible tint (CLAUDE.md §17).',
